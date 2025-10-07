@@ -27,12 +27,16 @@ from typing import List, Tuple
 # 1. CONFIGURATION PARAMETERS
 # =========================================================================
 
-N_QUBITS = 10          # Maximum number of qubits (nodes in the graph)
-NUM_GRAPHS = 200       # Number of random 3-regular graph instances
-S_RESOLUTION = 200     # Number of points to sample along s ∈ [0, 1]
+# GENREG files containing complete enumeration of 3-regular graphs
+GENREG_FILES = {
+    10: '10_3_3.asc',  # 19 graphs
+    12: '12_3_3.asc'   # 85 graphs
+}
+
+S_RESOLUTION = 200             # Number of points to sample along s ∈ [0, 1]
 
 # Output filename
-OUTPUT_FILENAME = f'outputs/Delta_min_3_regular_N{N_QUBITS}_{NUM_GRAPHS}graphs.csv'
+OUTPUT_FILENAME = 'outputs/Delta_min_3_regular_N10-12_ALL_GENREG_graphs.csv'
 
 # Tolerance for considering eigenvalues as degenerate
 DEGENERACY_TOL = 1e-8
@@ -96,7 +100,84 @@ def get_aqc_hamiltonian(s: float, H_B: np.ndarray, H_P: np.ndarray) -> np.ndarra
     return (1 - s) * H_B + s * H_P
 
 # =========================================================================
-# 4. SPECTRAL GAP CALCULATION (FIXED FOR DEGENERACY)
+# 4. GENREG FILE PARSING
+# =========================================================================
+
+def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
+    """
+    Parse GENREG .asc file and return list of graphs as edge lists.
+    
+    Args:
+        filename: Path to .asc file
+        
+    Returns:
+        List of edge lists, where each edge list is a list of (vertex1, vertex2) tuples
+        Vertices are 0-indexed.
+    """
+    graphs = []
+    current_graph = {}
+    in_adjacency = False
+    
+    with open(filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+            
+            if line.startswith('Graph'):
+                # Starting a new graph
+                if current_graph:
+                    # Save previous graph
+                    graphs.append(adjacency_to_edges(current_graph))
+                current_graph = {}
+                in_adjacency = True
+                
+            elif line.startswith('Taillenweite:'):
+                # End of adjacency list for this graph
+                in_adjacency = False
+                
+            elif in_adjacency and ':' in line:
+                # Parse adjacency line: "1 : 2 3 4"
+                try:
+                    parts = line.split(':')
+                    vertex = int(parts[0].strip())
+                    neighbors = [int(x) for x in parts[1].split()]
+                    current_graph[vertex] = neighbors
+                except (ValueError, IndexError):
+                    # Skip malformed lines
+                    continue
+    
+    # Don't forget last graph
+    if current_graph:
+        graphs.append(adjacency_to_edges(current_graph))
+    
+    return graphs
+
+
+def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
+    """
+    Convert adjacency dictionary to edge list (avoiding duplicates).
+    
+    Args:
+        adj_dict: Dictionary mapping vertex -> list of neighbors (1-indexed)
+        
+    Returns:
+        List of edges as (v1, v2) tuples (0-indexed), with v1 < v2
+    """
+    edges = []
+    seen = set()
+    
+    for v, neighbors in adj_dict.items():
+        for n in neighbors:
+            # Create canonical edge representation (smaller vertex first)
+            edge = (min(v, n), max(v, n))
+            if edge not in seen:
+                seen.add(edge)
+                # Convert to 0-indexed
+                edges.append((edge[0] - 1, edge[1] - 1))
+    
+    return sorted(edges)
+
+# =========================================================================
+# 5. SPECTRAL GAP CALCULATION (FIXED FOR DEGENERACY)
 # =========================================================================
 
 def find_first_gap(eigenvalues: np.ndarray, tol: float = DEGENERACY_TOL) -> Tuple[float, int]:
@@ -129,7 +210,7 @@ def find_first_gap(eigenvalues: np.ndarray, tol: float = DEGENERACY_TOL) -> Tupl
 
 
 def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray, 
-                              s_points: np.ndarray) -> Tuple[float, float, int]:
+                              s_points: np.ndarray, num_edges: int) -> Tuple[float, float, int, int]:
     """
     Calculates minimum spectral gap handling ground state degeneracy properly.
     
@@ -142,13 +223,20 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     not switching between E_1, E_2, etc. as degeneracies appear.
     
     Returns:
-        Tuple of (min_gap, s_at_min_gap, degeneracy_at_s1)
+        Tuple of (min_gap, s_at_min_gap, degeneracy_at_s1, max_cut_value)
     """
     # Step 1: Determine degeneracy at s=1 (problem Hamiltonian only)
     H_final = H_P  # At s=1, H(1) = H_problem
     k_vals = min(10, H_final.shape[0])
     evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
     _, degeneracy_s1 = find_first_gap(evals_final)
+    
+    # Calculate max cut value from ground state energy
+    # For H_problem = ∑_{(i,j)∈E} Z_i Z_j:
+    # - Edges in cut contribute -1, edges not in cut contribute +1
+    # - Cut_value = (total_edges - E_0) / 2
+    E_0 = evals_final[0]
+    max_cut_value = int((num_edges - E_0) / 2)
     
     # Step 2: Track E_k - E_0 where k is the degeneracy at s=1
     # This is the eigenvalue INDEX we need to track throughout
@@ -174,84 +262,96 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
             min_gap = gap
             s_at_min = s
     
-    return float(min_gap), float(s_at_min), int(degeneracy_s1)
+    return float(min_gap), float(s_at_min), int(degeneracy_s1), max_cut_value
 
 # =========================================================================
-# 5. MAIN EXECUTION
+# 6. MAIN EXECUTION
 # =========================================================================
 
 def main():
-    """Main execution function with robust gap calculation."""
+    """Main execution function using complete GENREG graph enumeration."""
     print("=" * 70)
     print("  AQC SPECTRAL GAP ANALYSIS FOR 3-REGULAR GRAPHS")
+    print("  Using Complete GENREG Graph Enumeration")
     print("=" * 70)
     print(f"\n📊 Configuration:")
-    print(f"  • N_QUBITS: {N_QUBITS}")
-    print(f"  • NUM_GRAPHS: {NUM_GRAPHS}")
     print(f"  • S_RESOLUTION: {S_RESOLUTION}")
     print(f"  • Degeneracy tolerance: {DEGENERACY_TOL}")
-    print(f"  • Hilbert space dimension: 2^{N_QUBITS} = {2**N_QUBITS}")
-    
-    # Validate configuration
-    if N_QUBITS % 2 != 0:
-        print(f"\n⚠️  WARNING: N={N_QUBITS} is odd. 3-regular graphs require N to be even.")
+    print(f"  • Source: Complete enumeration from GENREG")
+    print(f"\n📁 GENREG Files:")
+    for N, filename in GENREG_FILES.items():
+        print(f"  • N={N}: {filename}")
     
     # Initialize
     s_points = np.linspace(0.0, 1.0, S_RESOLUTION)
     data = []
     
-    # Pre-calculate the Initial Hamiltonian (H_B) - same for all graphs
-    print(f"\n🔨 Building H_initial (Mixer) matrix of size {2**N_QUBITS}×{2**N_QUBITS}...")
-    H_B = build_H_initial(N_QUBITS)
-    print("   ✓ Done")
-    
     # Start timer
     start_time = time.time()
-    print(f"\n🚀 Starting analysis of {NUM_GRAPHS} random 3-regular graphs...")
+    print(f"\n🚀 Starting analysis...")
     print("-" * 70)
     
-    degeneracy_counts = []
+    graph_counter = 0  # Global graph counter for unique IDs
     
-    for i in range(NUM_GRAPHS):
-        # Generate a random 3-regular graph (degree d=3 for all nodes)
+    # Loop over GENREG files
+    for N, filename in sorted(GENREG_FILES.items()):
+        print(f"\n▶ Processing N={N} (Hilbert space dimension: 2^{N} = {2**N})")
+        print(f"  📖 Reading graphs from {filename}...", end=" ")
+        
+        # Parse all graphs from file
         try:
-            G = nx.random_regular_graph(d=3, n=N_QUBITS)
-        except nx.NetworkXError as e:
-            print(f"❌ Error generating graph {i+1}: {e}")
+            graphs = parse_asc_file(filename)
+            print(f"✓ Found {len(graphs)} graphs")
+        except FileNotFoundError:
+            print(f"\n  ❌ Error: File not found: {filename}")
+            continue
+        except Exception as e:
+            print(f"\n  ❌ Error parsing file: {e}")
             continue
         
-        edges = list(G.edges())
+        # Pre-calculate the Initial Hamiltonian (H_B) for this N
+        print(f"  🔨 Building H_initial matrix {2**N}×{2**N}...", end=" ")
+        H_B = build_H_initial(N)
+        print("✓")
         
-        # Build the Problem Hamiltonian (H_P) for this specific graph
-        H_P = build_H_problem(N_QUBITS, edges)
+        num_edges = 3 * N // 2  # For 3-regular graphs
         
-        # Calculate the Minimum Spectral Gap (handling degeneracy)
-        delta_min, s_min, max_deg = calculate_min_gap_robust(H_B, H_P, s_points)
-        
-        degeneracy_counts.append(max_deg)
-        
-        # Store results
-        data.append({
-            'N': N_QUBITS,
-            'Graph_ID': i + 1,
-            'Delta_min': delta_min,
-            's_at_min': s_min,
-            'Max_degeneracy': max_deg,
-            'Edges': str(edges)
-        })
-        
-        # Progress reporting
-        if (i + 1) % 10 == 0:
-            elapsed = time.time() - start_time
-            avg_time = elapsed / (i + 1)
-            eta = avg_time * (NUM_GRAPHS - i - 1)
-            print(f"  [{i+1:3d}/{NUM_GRAPHS}] Δ_min={delta_min:.6f} at s={s_min:.3f} "
-                  f"(deg={max_deg}) | Elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s")
+        # Process each graph from GENREG
+        for i, edges in enumerate(graphs):
+            graph_counter += 1
+            
+            # Build the Problem Hamiltonian (H_P) for this specific graph
+            H_P = build_H_problem(N, edges)
+            
+            # Calculate the Minimum Spectral Gap (handling degeneracy) and max cut
+            delta_min, s_min, max_deg, max_cut = calculate_min_gap_robust(H_B, H_P, s_points, num_edges)
+            
+            # Store results
+            data.append({
+                'N': N,
+                'Graph_ID': graph_counter,
+                'Delta_min': delta_min,
+                's_at_min': s_min,
+                'Max_degeneracy': max_deg,
+                'Max_cut_value': max_cut,
+                'Edges': str(edges)
+            })
+            
+            # Progress reporting
+            report_freq = 5 if N <= 10 else 10
+            if (i + 1) % report_freq == 0 or (i + 1) == len(graphs):
+                elapsed = time.time() - start_time
+                print(f"    [{i+1:3d}/{len(graphs)}] Δ_min={delta_min:.6f} s={s_min:.3f} "
+                      f"cut={max_cut} deg={max_deg}")
+    
+    # Sort data by N first, then by Delta_min
+    print("\n" + "-" * 70)
+    print(f"\n📊 Sorting data by N and Delta_min...")
+    df = pd.DataFrame(data)
+    df = df.sort_values(['N', 'Delta_min'], ascending=[True, True])
     
     # Save results to CSV
-    print("-" * 70)
-    print(f"\n💾 Saving results to {OUTPUT_FILENAME}...")
-    df = pd.DataFrame(data)
+    print(f"💾 Saving results to {OUTPUT_FILENAME}...")
     df.to_csv(OUTPUT_FILENAME, index=False)
     
     # Final statistics
@@ -261,17 +361,19 @@ def main():
     print(f"   • Total time: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
     print(f"   • Average time per graph: {total_time/len(data):.2f} seconds")
     
-    print(f"\n📈 Spectral Gap Statistics:")
+    print(f"\n📈 Spectral Gap Statistics (Overall):")
     print(f"   • Mean Δ_min: {df['Delta_min'].mean():.6f}")
     print(f"   • Std Δ_min: {df['Delta_min'].std():.6f}")
     print(f"   • Min Δ_min: {df['Delta_min'].min():.6f} (hardest instance)")
     print(f"   • Max Δ_min: {df['Delta_min'].max():.6f} (easiest instance)")
-    print(f"   • Median Δ_min: {df['Delta_min'].median():.6f}")
     
-    print(f"\n📈 Degeneracy Statistics:")
-    print(f"   • Mean max degeneracy: {df['Max_degeneracy'].mean():.2f}")
-    print(f"   • Max degeneracy found: {df['Max_degeneracy'].max()}")
-    print(f"   • Graphs with degeneracy > 1: {(df['Max_degeneracy'] > 1).sum()}")
+    print(f"\n📈 Statistics by N:")
+    for N in sorted(GENREG_FILES.keys()):
+        df_n = df[df['N'] == N]
+        if len(df_n) > 0:
+            print(f"   N={N:2d}: Count={len(df_n):3d}, "
+                  f"Δ_min={df_n['Delta_min'].mean():.6f}±{df_n['Delta_min'].std():.6f}, "
+                  f"MaxCut={df_n['Max_cut_value'].mean():.1f}±{df_n['Max_cut_value'].std():.1f}")
     
     print(f"\n📁 Data saved to: {OUTPUT_FILENAME}")
     print("=" * 70)
