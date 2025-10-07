@@ -146,9 +146,9 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     """
     # Step 1: Determine degeneracy at s=1 (problem Hamiltonian only)
     H_final = H_P  # At s=1, H(1) = H_problem
-    k_vals = min(10, H_final.shape[0])
+    k_vals = min(20, H_final.shape[0])  # Check more eigenvalues for safety
     evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
-    _, degeneracy_s1, _ = find_first_gap(evals_final)
+    _, degeneracy_s1 = find_first_gap(evals_final)
     
     # Step 2: Track E_k - E_0 where k is the degeneracy at s=1
     # This is the eigenvalue INDEX we need to track throughout
@@ -161,14 +161,18 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
         
         # Get enough eigenvalues to track E_k
-        k_vals_needed = min(k_index + 5, H_s.shape[0])  # Get a few extra for safety
+        # Use larger buffer to handle cases where degeneracy increases during evolution
+        k_vals_needed = min(k_index + 10, H_s.shape[0])  # Larger safety buffer
         eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
         
         # Gap is E_k - E_0 where k is determined by s=1 degeneracy
         if k_index < len(eigenvalues):
             gap = eigenvalues[k_index] - eigenvalues[0]
         else:
-            gap = eigenvalues[-1] - eigenvalues[0]  # Fallback
+            # Fallback: compute more eigenvalues if needed
+            print(f"Warning: Need more eigenvalues at s={s:.3f}, k_index={k_index}, computed={len(eigenvalues)}")
+            eigenvalues_all = eigh(H_s, eigvals_only=True, subset_by_index=(0, min(k_index+1, H_s.shape[0]-1)))
+            gap = eigenvalues_all[k_index] - eigenvalues_all[0]
         
         if gap < min_gap:
             min_gap = gap

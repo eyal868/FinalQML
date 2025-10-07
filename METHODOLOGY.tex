@@ -1,0 +1,76 @@
+% Methodology for Spectral Gap Analysis
+% This text is ready to copy into Overleaf
+
+\subsection{Spectral Gap Calculation Methodology}
+
+We compute the minimum spectral gap $\Delta_{\text{min}}$ of the Adiabatic Quantum Computing (AQC) Hamiltonian for the Max-Cut problem on random 3-regular graphs. The AQC Hamiltonian is defined as:
+%
+\begin{equation}
+    \hat{H}(s) = (1-s)\hat{H}_{\text{initial}} + s\hat{H}_{\text{problem}}, \quad s \in [0,1],
+\end{equation}
+%
+where the initial (mixer) Hamiltonian is the transverse field
+%
+\begin{equation}
+    \hat{H}_{\text{initial}} = -\sum_{i=1}^{N} \hat{X}_i,
+\end{equation}
+%
+and the problem Hamiltonian encodes the Max-Cut objective as an Ising model
+%
+\begin{equation}
+    \hat{H}_{\text{problem}} = \sum_{(i,j) \in E} \hat{Z}_i \hat{Z}_j.
+\end{equation}
+%
+Here, $\hat{X}_i$ and $\hat{Z}_i$ are Pauli operators acting on qubit $i$, $N$ is the number of qubits (graph nodes), and $E$ is the set of edges.
+
+\subsubsection{Ground State Degeneracy Consideration}
+
+A critical aspect of our methodology is the proper treatment of ground state degeneracy arising from the bit-flip symmetry inherent in the Max-Cut problem. At $s=1$, if a bitstring $|\psi\rangle$ encodes a maximum cut, then the bit-flipped configuration $|\bar{\psi}\rangle$ yields an identical cut value, resulting in ground state degeneracy. For 3-regular graphs with $N$ nodes, we typically observe degeneracies ranging from 2-fold to $O(N)$-fold.
+
+The spectral gap at parameter $s$ is conventionally defined as the energy difference between the ground state and the first \emph{excited} state:
+%
+\begin{equation}
+    \Delta(s) = E_1(s) - E_0(s),
+\end{equation}
+%
+where $E_0(s) \leq E_1(s) \leq \cdots \leq E_{2^N-1}(s)$ are the ordered eigenvalues of $\hat{H}(s)$. However, when the ground state is $k$-fold degenerate at $s=1$, eigenvalues $E_0, E_1, \ldots, E_{k-1}$ correspond to degenerate ground states, not excited states. The physically meaningful spectral gap in this case is
+%
+\begin{equation}
+    \Delta(s) = E_k(s) - E_0(s),
+\end{equation}
+%
+where $k$ is determined by the ground state degeneracy at $s=1$.
+
+\subsubsection{Three-Step Algorithm}
+
+Our calculation proceeds in three steps:
+
+\begin{enumerate}
+    \item \textbf{Determine degeneracy at $s=1$:} We diagonalize $\hat{H}_{\text{problem}}$ and identify the ground state degeneracy $k$ by counting eigenvalues within a tolerance $\epsilon = 10^{-8}$ of the ground state energy $E_0$.
+    
+    \item \textbf{Track consistent eigenvalue:} Throughout the entire evolution $s \in [0,1]$, we compute the gap $\Delta(s) = E_k(s) - E_0(s)$, where the index $k$ is fixed from step 1. This ensures we track the same energy level across all $s$, not a "moving target" that would arise from locally checking degeneracy at each $s$.
+    
+    \item \textbf{Compute minimum gap:} The minimum spectral gap is
+    %
+    \begin{equation}
+        \Delta_{\text{min}} = \min_{s \in [0,1]} \left[ E_k(s) - E_0(s) \right].
+    \end{equation}
+    %
+    We sample $s$ at $M=200$ equally-spaced points and use the LAPACK eigenvalue solver with selective computation (computing only the lowest $k+5$ eigenvalues) for computational efficiency.
+\end{enumerate}
+
+\subsubsection{Significance for AQC Complexity}
+
+The minimum spectral gap $\Delta_{\text{min}}$ determines the adiabatic evolution time required to maintain high ground state fidelity. By the adiabatic theorem, the evolution time must satisfy
+%
+\begin{equation}
+    T \gg \frac{\hbar \cdot \max_s \|\partial_s \hat{H}(s)\|}{\Delta_{\text{min}}^2},
+\end{equation}
+%
+implying that the runtime scales as $T \propto 1/\Delta_{\text{min}}^2$. Our methodology ensures that $\Delta_{\text{min}}$ correctly captures the bottleneck in the adiabatic evolution, accounting for the symmetry-induced degeneracies characteristic of combinatorial optimization problems.
+
+\subsubsection{Implementation Details}
+
+We generate an ensemble of $200$ random 3-regular graphs with $N=10$ nodes using the configuration model. For each graph, we construct the $2^{10} \times 2^{10}$ Hamiltonian matrices using Kronecker products of Pauli operators. The eigenvalue calculations use the \texttt{scipy.linalg.eigh} routine with the \texttt{subset\_by\_index} parameter to compute only the required low-lying eigenvalues, providing significant computational speedup over full diagonalization.
+
+For each graph instance, we record the minimum gap $\Delta_{\text{min}}$, the parameter value $s^*$ where it occurs, and the ground state degeneracy $k$. This data enables subsequent correlation analysis with QAOA performance metrics and scaling studies as a function of problem size.
