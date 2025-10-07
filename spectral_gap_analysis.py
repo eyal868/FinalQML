@@ -161,7 +161,7 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
         
         # Get enough eigenvalues to track E_k
-        k_vals_needed = min(k_index + 5, H_s.shape[0])  # Small buffer for safety
+        k_vals_needed = min(k_index + 3, H_s.shape[0])  # Small buffer for safety
         eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
         
         # Gap is E_k - E_0 where k is determined by s=1 degeneracy
