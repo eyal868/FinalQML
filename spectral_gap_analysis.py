@@ -244,13 +244,15 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     
     min_gap = np.inf
     s_at_min = 0.0
-    
+    percent_complete = 0
     for s in s_points:
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
         
         # Get enough eigenvalues to track E_k
-        k_vals_needed = min(k_index + 3, H_s.shape[0])  # Small buffer for safety
+        k_vals_needed = min(k_index + 1, H_s.shape[0])  # Small buffer for safety
         eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
+        percent_complete = int((s / s_points[-1]) * 100)
+        print(f"\r    Progress: {percent_complete}% complete", end="")
         
         # Gap is E_k - E_0 where k is determined by s=1 degeneracy
         if k_index < len(eigenvalues):
