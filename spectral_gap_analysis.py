@@ -33,7 +33,7 @@ GENREG_FILES = {
     12: '12_3_3.asc'   # 85 graphs
 }
 
-S_RESOLUTION = 200             # Number of points to sample along s ∈ [0, 1]
+S_RESOLUTION = 100             # Number of points to sample along s ∈ [0, 1]
 
 # Output filename
 OUTPUT_FILENAME = 'outputs/Delta_min_3_regular_N10-12_ALL_GENREG_graphs.csv'
@@ -316,9 +316,11 @@ def main():
         
         num_edges = 3 * N // 2  # For 3-regular graphs
         
-        # Process each graph from GENREG
+        # Process each graph sequentially
+        graph_start_time = time.time()
         for i, edges in enumerate(graphs):
             graph_counter += 1
+            iter_start = time.time()
             
             # Build the Problem Hamiltonian (H_P) for this specific graph
             H_P = build_H_problem(N, edges)
@@ -337,12 +339,16 @@ def main():
                 'Edges': str(edges)
             })
             
-            # Progress reporting
-            report_freq = 5 if N <= 10 else 10
-            if (i + 1) % report_freq == 0 or (i + 1) == len(graphs):
-                elapsed = time.time() - start_time
-                print(f"    [{i+1:3d}/{len(graphs)}] Δ_min={delta_min:.6f} s={s_min:.3f} "
-                      f"cut={max_cut} deg={max_deg}")
+            # Timing for this graph
+            graph_time = time.time() - iter_start
+            elapsed_total = time.time() - start_time
+            avg_time = elapsed_total / graph_counter
+            eta = avg_time * (104 - graph_counter)  # 104 total graphs
+            
+            # Progress reporting (every graph)
+            print(f"    [{i+1:3d}/{len(graphs)}] Graph #{graph_counter:3d} | "
+                  f"⏱️  {graph_time:.1f}s | Δ_min={delta_min:.6f} s={s_min:.2f} "
+                  f"cut={max_cut} deg={max_deg} | Avg: {avg_time:.1f}s/graph | ETA: {eta/60:.1f}min")
     
     # Sort data by N first, then by Delta_min
     print("\n" + "-" * 70)
@@ -369,7 +375,7 @@ def main():
     
     print(f"\n📈 Statistics by N:")
     for N in sorted(GENREG_FILES.keys()):
-        df_n = df[df['N'] == N]
+        df_n = df[df['N'] == 12 ]
         if len(df_n) > 0:
             print(f"   N={N:2d}: Count={len(df_n):3d}, "
                   f"Δ_min={df_n['Delta_min'].mean():.6f}±{df_n['Delta_min'].std():.6f}, "
