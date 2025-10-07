@@ -130,32 +130,48 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     """
     Calculates minimum spectral gap handling ground state degeneracy properly.
     
-    At each s, finds the gap between E₀ and the first eigenvalue that is
-    NOT degenerate with E₀.
+    CORRECT METHOD:
+    1. First determine degeneracy at s=1 (pure problem Hamiltonian)
+    2. Find which eigenvalue index k is the first non-degenerate one
+    3. Track gap E_k - E_0 throughout the entire evolution
+    
+    This ensures we're tracking the SAME eigenvalue level throughout,
+    not switching between E_1, E_2, etc. as degeneracies appear.
     
     Returns:
-        Tuple of (min_gap, s_at_min_gap, max_degeneracy)
+        Tuple of (min_gap, s_at_min_gap, degeneracy_at_s1)
     """
+    # Step 1: Determine degeneracy at s=1 (problem Hamiltonian only)
+    H_final = H_P  # At s=1, H(1) = H_problem
+    k_vals = min(10, H_final.shape[0])
+    evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
+    _, degeneracy_s1, _ = find_first_gap(evals_final)
+    
+    # Step 2: Track E_k - E_0 where k is the degeneracy at s=1
+    # This is the eigenvalue INDEX we need to track throughout
+    k_index = degeneracy_s1  # If ground state is deg_s1-fold, track E_{deg_s1}
+    
     min_gap = np.inf
     s_at_min = 0.0
-    max_degeneracy = 1
     
     for s in s_points:
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
         
-        # Need more than 2 eigenvalues to handle degeneracy
-        # Get lowest 10 to be safe (or all if dimension < 10)
-        k_vals = min(10, H_s.shape[0])
-        eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals-1))
+        # Get enough eigenvalues to track E_k
+        k_vals_needed = min(k_index + 5, H_s.shape[0])  # Get a few extra for safety
+        eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
         
-        gap, degeneracy = find_first_gap(eigenvalues)
+        # Gap is E_k - E_0 where k is determined by s=1 degeneracy
+        if k_index < len(eigenvalues):
+            gap = eigenvalues[k_index] - eigenvalues[0]
+        else:
+            gap = eigenvalues[-1] - eigenvalues[0]  # Fallback
         
         if gap < min_gap:
             min_gap = gap
             s_at_min = s
-            max_degeneracy = degeneracy
     
-    return float(min_gap), float(s_at_min), int(max_degeneracy)
+    return float(min_gap), float(s_at_min), int(degeneracy_s1)
 
 # =========================================================================
 # 5. MAIN EXECUTION
