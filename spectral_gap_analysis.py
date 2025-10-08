@@ -30,12 +30,12 @@ from typing import List, Tuple
 CONFIG = {
     'N_values': [12],                     # Which N to process: [10], [12], or [10, 12]
     'S_resolution': 20,                   # Sampling points along s ∈ [0, 1]
-    'graphs_per_N': {                     # Graph selection per N
-        10: None,                         # None=all, int=first N, range/list=specific examples: range(5,25) or [1,5,14]
-        12: {5,7,15,20,26,44,59,72}
+    'graphs_per_N': {                     # Graph selection per N (1-indexed Graph_IDs from CSV)
+        10: None,                         # None=all, int=first N, range/list=specific Graph_IDs
+        12: {5,44}  # Use Graph_ID values from CSV (e.g.,  for deg=10)
     },
-    'k_vals_check': 20,                   # Eigenvalues to check for degeneracy
-    'output_suffix': 'large_deg'                # Optional filename suffix
+    'k_vals_check': 40,                   # Eigenvalues to check for degeneracy
+    'output_suffix': 'large_deg40'                # Optional filename suffix
 }
 
 # GENREG data files
@@ -239,9 +239,9 @@ def main():
         elif isinstance(selection, int):
             print(f"  • N={N}: First {selection} graphs from {GENREG_FILES.get(N, 'N/A')}")
         elif isinstance(selection, range):
-            print(f"  • N={N}: Graphs {selection.start}-{selection.stop-1} from {GENREG_FILES.get(N, 'N/A')}")
+            print(f"  • N={N}: Graph_IDs {selection.start}-{selection.stop-1} from {GENREG_FILES.get(N, 'N/A')}")
         else:
-            print(f"  • N={N}: Selected graphs {list(selection)} from {GENREG_FILES.get(N, 'N/A')}")
+            print(f"  • N={N}: Graph_IDs {sorted(selection)} from {GENREG_FILES.get(N, 'N/A')}")
     
     # Initialize
     s_points = np.linspace(0.0, 1.0, CONFIG['S_resolution'])
@@ -282,15 +282,23 @@ def main():
             continue
         
         # Select which graphs to process based on configuration
+        # Config values are Graph_IDs (1-indexed), convert to file positions (0-indexed)
         selection = CONFIG['graphs_per_N'].get(N, None)
         if selection is None:
             graphs = all_graphs
+            graph_ids = list(range(len(all_graphs)))  # 0-indexed positions
         elif isinstance(selection, int):
             graphs = all_graphs[:selection]
+            graph_ids = list(range(selection))
         elif isinstance(selection, range):
-            graphs = [all_graphs[i] for i in selection if i < len(all_graphs)]
-        else:  # list or other iterable
-            graphs = [all_graphs[i] for i in selection if i < len(all_graphs)]
+            # Config has Graph_IDs (1-indexed), convert to positions (0-indexed)
+            positions = [i-1 for i in selection if 1 <= i <= len(all_graphs)]
+            graphs = [all_graphs[i] for i in positions]
+            graph_ids = positions
+        else:  # set, list, or other iterable (contains Graph_IDs, 1-indexed)
+            positions = [i-1 for i in sorted(selection) if 1 <= i <= len(all_graphs)]
+            graphs = [all_graphs[i] for i in positions]
+            graph_ids = positions
         
         print(f"  🎯 Processing {len(graphs)} selected graphs")
         
@@ -303,9 +311,12 @@ def main():
         
         # Process each graph sequentially
         graph_start_time = time.time()
-        for i, edges in enumerate(graphs):
+        for i, (file_pos, edges) in enumerate(zip(graph_ids, graphs)):
             graph_counter += 1
             iter_start = time.time()
+            
+            # Graph_ID is 1-indexed file position (not sequential counter)
+            graph_id = file_pos + 1
             
             # Build the Problem Hamiltonian (H_P) for this specific graph
             H_P = build_H_problem(N, edges)
@@ -316,7 +327,7 @@ def main():
             # Store results
             data.append({
                 'N': N,
-                'Graph_ID': graph_counter,
+                'Graph_ID': graph_id,  # 1-indexed file position
                 'Delta_min': delta_min,
                 's_at_min': s_min,
                 'Max_degeneracy': max_deg,
@@ -331,7 +342,7 @@ def main():
             eta = avg_time * (total_graphs - graph_counter)
             
             # Progress reporting (every graph)
-            print(f"    [{i+1:3d}/{len(graphs)}] Graph #{graph_counter:3d} | "
+            print(f"    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | "
                   f"⏱️  {graph_time:.1f}s | Δ_min={delta_min:.6f} s={s_min:.2f} "
                   f"cut={max_cut} deg={max_deg} | Avg: {avg_time:.1f}s/graph | ETA: {eta/60:.1f}min")
     

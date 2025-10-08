@@ -43,7 +43,7 @@ OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_results_N10_p1.csv'
+OUTPUT_FILENAME = 'outputs/QAOA_results_N10_p2.csv'
 
 # Simulation backend
 SIMULATOR_METHOD = 'statevector'  # Noiseless simulation
@@ -106,6 +106,30 @@ def evaluate_cut_value(bitstring: str, edges: List[Tuple[int, int]]) -> int:
         if bitstring[u] != bitstring[v]:
             cut_value += 1
     return cut_value
+
+
+def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]]) -> float:
+    """
+    Calculate expected cut value from measurement counts.
+    
+    Expected cut = ∑_bitstrings P(bitstring) × cut_value(bitstring)
+    
+    Args:
+        counts: Dictionary mapping bitstrings to counts
+        edges: List of edges
+        
+    Returns:
+        Expected cut value (as float)
+    """
+    expected_cut = 0.0
+    total_shots = sum(counts.values())
+    
+    for bitstring, count in counts.items():
+        prob = count / total_shots
+        cut_val = evaluate_cut_value(bitstring, edges)
+        expected_cut += prob * cut_val
+    
+    return expected_cut
 
 
 # =========================================================================
@@ -229,16 +253,31 @@ def run_qaoa(edges: List[Tuple[int, int]],
     result_final = job_final.result()
     counts_final = result_final.get_counts()
     
-    # Find bitstring with highest count
-    best_bitstring = max(counts_final, key=counts_final.get)
-    best_bitstring_reversed = best_bitstring[::-1]  # Qiskit little-endian
+    # Convert all bitstrings to big-endian (reverse Qiskit's little-endian)
+    counts_reversed = {}
+    for bitstring, count in counts_final.items():
+        counts_reversed[bitstring[::-1]] = count
     
-    # Calculate cut value for best solution
-    best_cut_value = evaluate_cut_value(best_bitstring_reversed, edges)
+    # Find most probable bitstring
+    most_probable_bitstring = max(counts_reversed, key=counts_reversed.get)
+    most_probable_count = counts_reversed[most_probable_bitstring]
+    most_probable_prob = most_probable_count / NUM_SHOTS
+    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges)
+    
+    # Calculate expected cut value (correct approximation ratio)
+    expected_cut = calculate_expected_cut(counts_reversed, edges)
+    
+    # Best measured bitstring (for reference)
+    best_bitstring = most_probable_bitstring
+    best_cut_value = most_probable_cut
     
     return {
-        'best_bitstring': best_bitstring_reversed,
+        'best_bitstring': best_bitstring,
         'best_cut_value': best_cut_value,
+        'most_probable_bitstring': most_probable_bitstring,
+        'most_probable_prob': most_probable_prob,
+        'most_probable_cut': most_probable_cut,
+        'expected_cut': expected_cut,
         'num_iterations': iteration_count[0],
         'final_cost': result.fun,
         'optimization_time': optimization_time,
@@ -350,8 +389,9 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
                 max_iter=MAX_OPTIMIZER_ITERATIONS
             )
             
-            # Calculate approximation ratio
-            approx_ratio = qaoa_result['best_cut_value'] / optimal_cut
+            # Calculate approximation ratio (FIXED: using expected cut)
+            expected_cut = qaoa_result['expected_cut']
+            approx_ratio = expected_cut / optimal_cut
             
             # Store results
             results_data.append({
@@ -362,17 +402,21 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
                 'Max_degeneracy': row['Max_degeneracy'],
                 'Optimal_cut': optimal_cut,
                 'p_layers': P_LAYERS,
-                'QAOA_cut_value': qaoa_result['best_cut_value'],
+                'Expected_cut': expected_cut,
                 'Approximation_ratio': approx_ratio,
+                'Most_probable_bitstring': qaoa_result['most_probable_bitstring'],
+                'Most_probable_prob': qaoa_result['most_probable_prob'],
+                'Most_probable_cut': qaoa_result['most_probable_cut'],
+                'Best_measured_bitstring': qaoa_result['best_bitstring'],
+                'Best_measured_cut': qaoa_result['best_cut_value'],
                 'Optimizer_iterations': qaoa_result['num_iterations'],
                 'Final_cost': qaoa_result['final_cost'],
-                'Optimization_time': qaoa_result['optimization_time'],
-                'Best_bitstring': qaoa_result['best_bitstring']
+                'Optimization_time': qaoa_result['optimization_time']
             })
             
-            print(f"    ✓ Result: Cut={qaoa_result['best_cut_value']}/{optimal_cut}, "
-                  f"Ratio={approx_ratio:.4f}, Iters={qaoa_result['num_iterations']}, "
-                  f"Time={qaoa_result['optimization_time']:.1f}s")
+            print(f"    ✓ Result: Expected_cut={expected_cut:.2f}/{optimal_cut}, "
+                  f"Ratio={approx_ratio:.4f}, MostProb_cut={qaoa_result['most_probable_cut']}, "
+                  f"Iters={qaoa_result['num_iterations']}, Time={qaoa_result['optimization_time']:.1f}s")
             
         except Exception as e:
             print(f"    ❌ Error: {e}")
@@ -385,12 +429,16 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
                 'Max_degeneracy': row['Max_degeneracy'],
                 'Optimal_cut': optimal_cut,
                 'p_layers': P_LAYERS,
-                'QAOA_cut_value': -1,
+                'Expected_cut': -1,
                 'Approximation_ratio': -1,
+                'Most_probable_bitstring': 'ERROR',
+                'Most_probable_prob': -1,
+                'Most_probable_cut': -1,
+                'Best_measured_bitstring': 'ERROR',
+                'Best_measured_cut': -1,
                 'Optimizer_iterations': -1,
                 'Final_cost': np.nan,
-                'Optimization_time': -1,
-                'Best_bitstring': 'ERROR'
+                'Optimization_time': -1
             })
     
     total_time = time.time() - total_start_time
