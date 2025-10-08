@@ -1,10 +1,10 @@
 # Spectral Gap Analysis for Adiabatic Quantum Computing
 
-This project analyzes the **minimum spectral gap (Δ_min)** of the Adiabatic Quantum Computing (AQC) Hamiltonian for **Max-Cut on 3-regular graphs**. The goal is to study the connection between Δ_min and QAOA performance, where AQC runtime scales as **T ∝ 1/(Δ_min)²**.
+Analysis of minimum spectral gap (Δ_min) for the Adiabatic Quantum Computing Hamiltonian on Max-Cut problems for 3-regular graphs. Studies the connection between Δ_min and QAOA performance, where AQC runtime scales as **T ∝ 1/(Δ_min)²**.
 
-## Key Innovation: Degeneracy-Aware Gap Calculation
+## Key Innovation
 
-Max-Cut problems have **bit-flip symmetry** causing ground state degeneracy. This implementation correctly tracks **E_k - E_0** (where k = degeneracy) throughout the evolution, not just E_1 - E_0. This yields physically meaningful gaps (~1.8) instead of meaningless near-zero values (~0.002).
+**Degeneracy-Aware Gap Calculation**: Correctly tracks **E_k - E_0** (where k = degeneracy at s=1) throughout evolution, not just E_1 - E_0. This yields physically meaningful gaps (~1.8) instead of near-zero artifacts (~0.002).
 
 ## Quick Start
 
@@ -17,39 +17,31 @@ pip3 install -r requirements.txt
 ```bash
 python3 spectral_gap_analysis.py
 ```
-Output: `outputs/Delta_min_3_regular_N10_200graphs.csv`
 
-### Visualize Methodology
+Edit `CONFIG` at top of file to customize:
+```python
+CONFIG = {
+    'N_values': [10, 12],           # Which N to process
+    'S_resolution': 100,             # Sampling resolution
+    'graphs_per_N': {                # Graph selection
+        10: None,                    # None=all, int=first N, range/list=specific
+        12: range(8, 85)            # Skip problematic graphs
+    },
+    'k_vals_check': 20,              # Eigenvalues to check (increase for high degeneracy)
+    'output_suffix': ''              # Optional filename suffix
+}
+```
+
+Output: Auto-generated CSV filename based on configuration
+
+### Visualize
 ```bash
 python3 plot_example_spectrum.py
 ```
-Output: `outputs/example_full_spectrum_N4.png`
-
-## Configuration
-
-Edit parameters in `spectral_gap_analysis.py`:
-```python
-N_QUBITS = 10          # Number of qubits (nodes in graph)
-NUM_GRAPHS = 200       # Number of random graph instances
-S_RESOLUTION = 200     # Sampling points for s ∈ [0, 1]
-```
-
-### Performance Guidelines
-
-| N_QUBITS | Hilbert Space | Time per Graph | 200 Graphs |
-|----------|---------------|----------------|------------|
-| 6        | 64            | ~0.2s          | ~1 min     |
-| 8        | 256           | ~1s            | ~3 min     |
-| 10       | 1024          | ~4s            | ~15 min    |
-| 12       | 4096          | ~15s           | ~50 min    |
-
-**Warning:** N ≥ 14 requires significant RAM and time.
 
 ## Theory
 
-### Hamiltonian Definition
-
-The AQC Hamiltonian interpolates between:
+### Hamiltonians
 
 **Initial (Mixer):**
 ```
@@ -61,105 +53,95 @@ H_initial = -∑ᵢ X̂ᵢ
 H_problem = ∑₍ᵢ,ⱼ₎∈E ẐᵢẐⱼ
 ```
 
-**Time-Dependent:**
+**AQC Path:**
 ```
 H(s) = (1-s)·H_initial + s·H_problem,  s ∈ [0, 1]
 ```
 
 ### Spectral Gap
 
-The spectral gap at parameter s is:
+Gap at parameter s:
 ```
 Δ(s) = E_k(s) - E_0(s)
 ```
+where k = ground state degeneracy at s=1.
 
-where k is the ground state degeneracy at s=1. The minimum spectral gap:
+Minimum spectral gap:
 ```
 Δ_min = min_{s∈[0,1]} Δ(s)
 ```
 
-determines the adiabatic evolution time needed to remain in the ground state.
+## Configuration Examples
+
+**Process all graphs:**
+```python
+CONFIG = {'N_values': [10, 12], 'S_resolution': 100, 'graphs_per_N': {10: None, 12: None}}
+# Output: Delta_min_3_regular_N10_12_res100.csv
+```
+
+**Skip problematic N=12 graphs:**
+```python
+CONFIG = {'N_values': [12], 'S_resolution': 100, 'graphs_per_N': {12: range(8, 85)}, 'output_suffix': '_skip8'}
+# Output: Delta_min_3_regular_N12_res100_skip8.csv
+```
+
+**Quick test:**
+```python
+CONFIG = {'N_values': [10], 'S_resolution': 20, 'graphs_per_N': {10: 5}, 'output_suffix': '_test'}
+# Output: Delta_min_3_regular_N10_res20_test.csv
+```
 
 ## Output Format
 
-CSV file with columns:
+CSV columns:
 - `N`: Number of qubits
-- `Graph_ID`: Instance identifier
+- `Graph_ID`: Unique identifier
 - `Delta_min`: Minimum spectral gap
 - `s_at_min`: Location where minimum occurs
 - `Max_degeneracy`: Ground state degeneracy at s=1
+- `Max_cut_value`: Maximum cut value
 - `Edges`: Graph edge list (for reproduction)
 
-## Analysis Examples
+## Data Source
 
-### Load and Explore Data
-```python
-import pandas as pd
+Uses complete GENREG enumeration:
+- N=10: 19 graphs from `10_3_3.asc`
+- N=12: 85 graphs from `12_3_3.asc`
 
-df = pd.read_csv('outputs/Delta_min_3_regular_N10_200graphs.csv')
+See [GENREG](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html) for details.
 
-print(f"Mean Δ_min: {df['Delta_min'].mean():.6f}")
-print(f"Std Δ_min: {df['Delta_min'].std():.6f}")
+## Performance
 
-# Find hardest instance
-hardest = df.loc[df['Delta_min'].idxmin()]
-print(f"\nHardest graph: ID {hardest['Graph_ID']}")
-print(f"  Δ_min = {hardest['Delta_min']:.6f}")
-```
+| N | Graphs | Time/Graph | Total Time |
+|---|--------|------------|------------|
+| 10 | 19 | ~2s | ~40s |
+| 12 | 85 | ~8s | ~11min |
 
-### Recreate Specific Graph
-```python
-import ast
-import networkx as nx
-
-edges = ast.literal_eval(df.loc[0, 'Edges'])
-G = nx.Graph()
-G.add_edges_from(edges)
-```
-
-## Research Applications
-
-1. **QAOA Comparison**: Run QAOA on same graphs, correlate performance with Δ_min
-2. **Scaling Studies**: Vary N (6, 8, 10, 12) to study Δ_min(N) scaling
-3. **Graph Properties**: Correlate Δ_min with clustering, girth, etc.
-4. **Hardness Prediction**: Use Δ_min to predict algorithm performance
+Resolution 100 (default). Time scales linearly with `S_resolution`.
 
 ## Project Structure
 
 ```
 FinalQML/
 ├── spectral_gap_analysis.py      # Main analysis script
+├── spectral_gap_analysis_test.py # Alternative Hamiltonian formulation
 ├── plot_example_spectrum.py      # Visualization tool
+├── 10_3_3.asc, 12_3_3.asc        # GENREG data files
 ├── requirements.txt               # Dependencies
-├── README.md                      # This file (overview)
-├── CONTEXT.md                     # Technical implementation details
-├── METHODOLOGY.tex                # LaTeX methodology for papers
-└── outputs/                       # Generated data and plots
+├── README.md                      # This file
+└── METHODOLOGY.tex                # LaTeX methodology for papers
 ```
-
-## Troubleshooting
-
-**Getting Δ_min ≈ 0?**
-- Check that you're tracking E_k, not E_1. The code handles this automatically.
-
-**Runtime too long?**
-- Reduce N_QUBITS (exponential scaling) or NUM_GRAPHS.
-
-**Memory error?**
-- N too large. Each increment doubles memory usage.
-
-**Large degeneracy (>10)?**
-- May indicate highly symmetric graph. Check graph structure.
 
 ## References
 
-- Farhi, E., et al. "Quantum Computation by Adiabatic Evolution" (2000)
-- Farhi, E., et al. "A Quantum Approximate Optimization Algorithm" (2014)
-- Crosson & Harrow, "Simulated quantum annealing can be exponentially faster than classical simulated annealing" (2016)
+- Farhi et al., "Quantum Computation by Adiabatic Evolution" (2000)
+- Farhi et al., "A Quantum Approximate Optimization Algorithm" (2014)
+- Crosson & Harrow, "Simulated quantum annealing..." (2016)
+- GENREG: Meringer, "Fast generation of regular graphs..." (1999)
 
 ## License
 
-This research code is provided for academic use.
+Academic research use.
 
 ---
 

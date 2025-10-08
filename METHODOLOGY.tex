@@ -3,7 +3,7 @@
 
 \subsection{Spectral Gap Calculation Methodology}
 
-We compute the minimum spectral gap $\Delta_{\text{min}}$ of the Adiabatic Quantum Computing (AQC) Hamiltonian for the Max-Cut problem on random 3-regular graphs. The AQC Hamiltonian is defined as:
+We compute the minimum spectral gap $\Delta_{\text{min}}$ of the Adiabatic Quantum Computing (AQC) Hamiltonian for the Max-Cut problem on 3-regular graphs. The AQC Hamiltonian is defined as:
 %
 \begin{equation}
     \hat{H}(s) = (1-s)\hat{H}_{\text{initial}} + s\hat{H}_{\text{problem}}, \quad s \in [0,1],
@@ -25,7 +25,7 @@ Here, $\hat{X}_i$ and $\hat{Z}_i$ are Pauli operators acting on qubit $i$, $N$ i
 
 \subsubsection{Ground State Degeneracy Consideration}
 
-A critical aspect of our methodology is the proper treatment of ground state degeneracy arising from the bit-flip symmetry inherent in the Max-Cut problem. At $s=1$, if a bitstring $|\psi\rangle$ encodes a maximum cut, then the bit-flipped configuration $|\bar{\psi}\rangle$ yields an identical cut value, resulting in ground state degeneracy. For 3-regular graphs with $N$ nodes, we typically observe degeneracies ranging from 2-fold to $O(N)$-fold.
+A critical aspect of our methodology is the proper treatment of ground state degeneracy arising from the bit-flip symmetry inherent in the Max-Cut problem. At $s=1$, if a bitstring $|\psi\rangle$ encodes a maximum cut, then the bit-flipped configuration $|\bar{\psi}\rangle$ yields an identical cut value, resulting in ground state degeneracy. For 3-regular graphs with $N$ nodes, we observe degeneracies ranging from 2-fold to 10-fold, with some highly symmetric instances exhibiting even higher degeneracies.
 
 The spectral gap at parameter $s$ is conventionally defined as the energy difference between the ground state and the first \emph{excited} state:
 %
@@ -46,7 +46,7 @@ where $k$ is determined by the ground state degeneracy at $s=1$.
 Our calculation proceeds in three steps:
 
 \begin{enumerate}
-    \item \textbf{Determine degeneracy at $s=1$:} We diagonalize $\hat{H}_{\text{problem}}$ and identify the ground state degeneracy $k$ by counting eigenvalues within a tolerance $\epsilon = 10^{-8}$ of the ground state energy $E_0$.
+    \item \textbf{Determine degeneracy at $s=1$:} We diagonalize $\hat{H}_{\text{problem}}$ and identify the ground state degeneracy $k$ by counting eigenvalues within a tolerance $\epsilon = 10^{-8}$ of the ground state energy $E_0$. We compute the lowest 20 eigenvalues to reliably detect degeneracies up to this level.
     
     \item \textbf{Track consistent eigenvalue:} Throughout the entire evolution $s \in [0,1]$, we compute the gap $\Delta(s) = E_k(s) - E_0(s)$, where the index $k$ is fixed from step 1. This ensures we track the same energy level across all $s$, not a "moving target" that would arise from locally checking degeneracy at each $s$.
     
@@ -56,7 +56,7 @@ Our calculation proceeds in three steps:
         \Delta_{\text{min}} = \min_{s \in [0,1]} \left[ E_k(s) - E_0(s) \right].
     \end{equation}
     %
-    We sample $s$ at $M=200$ equally-spaced points and use the LAPACK eigenvalue solver with selective computation (computing only the lowest $k+5$ eigenvalues) for computational efficiency.
+    We sample $s$ at $M=100$ equally-spaced points (configurable) and use the LAPACK eigenvalue solver with selective computation (computing only the lowest $k+1$ eigenvalues) for computational efficiency.
 \end{enumerate}
 
 \subsubsection{Significance for AQC Complexity}
@@ -71,6 +71,8 @@ implying that the runtime scales as $T \propto 1/\Delta_{\text{min}}^2$. Our met
 
 \subsubsection{Implementation Details}
 
-We generate an ensemble of $200$ random 3-regular graphs with $N=10$ nodes using the configuration model. For each graph, we construct the $2^{10} \times 2^{10}$ Hamiltonian matrices using Kronecker products of Pauli operators. The eigenvalue calculations use the \texttt{scipy.linalg.eigh} routine with the \texttt{subset\_by\_index} parameter to compute only the required low-lying eigenvalues, providing significant computational speedup over full diagonalization.
+We analyze complete enumerations of 3-regular graphs obtained from the GENREG database~\cite{meringer1999}. Specifically, we study all 19 non-isomorphic 3-regular graphs with $N=10$ nodes and all 85 graphs with $N=12$ nodes. This exhaustive approach eliminates sampling bias and ensures comprehensive coverage of the structural diversity in 3-regular graphs of these sizes.
 
-For each graph instance, we record the minimum gap $\Delta_{\text{min}}$, the parameter value $s^*$ where it occurs, and the ground state degeneracy $k$. This data enables subsequent correlation analysis with QAOA performance metrics and scaling studies as a function of problem size.
+For each graph instance, we construct the $2^N \times 2^N$ Hamiltonian matrices using Kronecker products of Pauli operators. The eigenvalue calculations use the \texttt{scipy.linalg.eigh} routine with the \texttt{subset\_by\_index} parameter to compute only the required low-lying eigenvalues, providing significant computational speedup over full diagonalization. The implementation is configurable, allowing selective processing of graph subsets (e.g., excluding highly degenerate instances) and adjustable resolution for the $s$ parameter sampling.
+
+For each graph instance, we record the minimum gap $\Delta_{\text{min}}$, the parameter value $s^*$ where it occurs, the ground state degeneracy $k$, and the maximum cut value. This data enables subsequent correlation analysis with QAOA performance metrics and facilitates investigation of the relationship between graph structure, spectral properties, and algorithm performance.

@@ -27,76 +27,72 @@ from typing import List, Tuple
 # 1. CONFIGURATION PARAMETERS
 # =========================================================================
 
-# GENREG files containing complete enumeration of 3-regular graphs
-GENREG_FILES = {
-    10: '10_3_3.asc',  # 19 graphs
-    12: '12_3_3.asc'   # 85 graphs
+CONFIG = {
+    'N_values': [12],                     # Which N to process: [10], [12], or [10, 12]
+    'S_resolution': 20,                   # Sampling points along s ∈ [0, 1]
+    'graphs_per_N': {                     # Graph selection per N
+        10: None,                         # None=all, int=first N, range/list=specific examples: range(5,25) or [1,5,14]
+        12: {5,7,15,20,26,44,59,72}
+    },
+    'k_vals_check': 20,                   # Eigenvalues to check for degeneracy
+    'output_suffix': 'large_deg'                # Optional filename suffix
 }
 
-S_RESOLUTION = 100             # Number of points to sample along s ∈ [0, 1]
-
-# Output filename
-OUTPUT_FILENAME = 'outputs/Delta_min_3_regular_N10-12_ALL_GENREG_graphs.csv'
-
-# Tolerance for considering eigenvalues as degenerate
+# GENREG data files
+GENREG_FILES = {10: '10_3_3.asc', 12: '12_3_3.asc'}
 DEGENERACY_TOL = 1e-8
+def _generate_output_filename():
+    """Auto-generate filename from configuration."""
+    N_str = f"N{CONFIG['N_values'][0]}" if len(CONFIG['N_values']) == 1 else f"N{'_'.join(map(str, CONFIG['N_values']))}"
+    return f"outputs/Delta_min_3_regular_{N_str}_res{CONFIG['S_resolution']}{CONFIG['output_suffix']}.csv"
+
+OUTPUT_FILENAME = _generate_output_filename()
 
 # =========================================================================
-# 2. PAULI MATRICES DEFINITION
+# 2. PAULI MATRICES
 # =========================================================================
 
-# Single-qubit Pauli matrices
-SIGMA_X = np.array([[0, 1], 
-                     [1, 0]], dtype=complex)
-
-SIGMA_Z = np.array([[1, 0], 
-                     [0, -1]], dtype=complex)
-
+SIGMA_X = np.array([[0, 1], [1, 0]], dtype=complex)
+SIGMA_Z = np.array([[1, 0], [0, -1]], dtype=complex)
 IDENTITY = np.eye(2, dtype=complex)
 
 # =========================================================================
-# 3. HAMILTONIAN CONSTRUCTION FUNCTIONS
+# 3. HAMILTONIAN CONSTRUCTION
 # =========================================================================
 
 def pauli_tensor_product(op_list: List[np.ndarray]) -> np.ndarray:
-    """Computes the tensor product of a list of 2x2 matrices."""
+    """Tensor product of 2x2 matrices."""
     result = op_list[0]
     for op in op_list[1:]:
         result = np.kron(result, op)
     return result
 
-
 def get_pauli_term(N: int, pauli_type: str, index1: int, index2: int = -1) -> np.ndarray:
-    """Generates an N-qubit operator (X_i or Z_i⊗Z_j) as a 2^N × 2^N matrix."""
+    """Generate N-qubit operator: X_i or Z_i⊗Z_j."""
     operators = [IDENTITY] * N
-    
     if pauli_type == 'X':
         operators[index1] = SIGMA_X
     elif pauli_type == 'ZZ':
         operators[index1] = SIGMA_Z
         operators[index2] = SIGMA_Z
-    
     return pauli_tensor_product(operators)
 
-
 def build_H_initial(N: int) -> np.ndarray:
-    """Builds the Initial (Mixer) Hamiltonian: H_initial = -∑ᵢ X̂ᵢ"""
+    """H_initial = -∑ᵢ X̂ᵢ (transverse field mixer)"""
     H_B = np.zeros((2**N, 2**N), dtype=complex)
     for i in range(N):
         H_B += get_pauli_term(N, 'X', i)
     return -H_B
 
-
 def build_H_problem(N: int, edges: List[Tuple[int, int]]) -> np.ndarray:
-    """Builds the Problem (Cost) Hamiltonian: H_problem = ∑₍ᵢ,ⱼ₎∈E ẐᵢẐⱼ"""
+    """H_problem = ∑₍ᵢ,ⱼ₎∈E ẐᵢẐⱼ (Max-Cut Hamiltonian)"""
     H_P = np.zeros((2**N, 2**N), dtype=complex)
     for u, v in edges:
         H_P += get_pauli_term(N, 'ZZ', u, v)
     return H_P
 
-
 def get_aqc_hamiltonian(s: float, H_B: np.ndarray, H_P: np.ndarray) -> np.ndarray:
-    """Returns H(s) = (1-s)·H_initial + s·H_problem"""
+    """H(s) = (1-s)·H_initial + s·H_problem"""
     return (1 - s) * H_B + s * H_P
 
 # =========================================================================
@@ -104,16 +100,7 @@ def get_aqc_hamiltonian(s: float, H_B: np.ndarray, H_P: np.ndarray) -> np.ndarra
 # =========================================================================
 
 def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
-    """
-    Parse GENREG .asc file and return list of graphs as edge lists.
-    
-    Args:
-        filename: Path to .asc file
-        
-    Returns:
-        List of edge lists, where each edge list is a list of (vertex1, vertex2) tuples
-        Vertices are 0-indexed.
-    """
+    """Parse GENREG .asc file, return list of graphs as 0-indexed edge lists."""
     graphs = []
     current_graph = {}
     in_adjacency = False
@@ -131,26 +118,19 @@ def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
                 in_adjacency = True
                 
             elif line.startswith('Taillenweite:'):
-                # End of adjacency list for this graph
                 in_adjacency = False
-                
             elif in_adjacency and ':' in line:
-                # Parse adjacency line: "1 : 2 3 4"
                 try:
                     parts = line.split(':')
                     vertex = int(parts[0].strip())
                     neighbors = [int(x) for x in parts[1].split()]
                     current_graph[vertex] = neighbors
                 except (ValueError, IndexError):
-                    # Skip malformed lines
                     continue
     
-    # Don't forget last graph
     if current_graph:
         graphs.append(adjacency_to_edges(current_graph))
-    
     return graphs
-
 
 def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
     """
@@ -167,34 +147,20 @@ def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
     
     for v, neighbors in adj_dict.items():
         for n in neighbors:
-            # Create canonical edge representation (smaller vertex first)
             edge = (min(v, n), max(v, n))
             if edge not in seen:
                 seen.add(edge)
-                # Convert to 0-indexed
                 edges.append((edge[0] - 1, edge[1] - 1))
-    
     return sorted(edges)
 
 # =========================================================================
-# 5. SPECTRAL GAP CALCULATION (FIXED FOR DEGENERACY)
+# 5. SPECTRAL GAP CALCULATION
 # =========================================================================
 
 def find_first_gap(eigenvalues: np.ndarray, tol: float = DEGENERACY_TOL) -> Tuple[float, int]:
-    """
-    Find the gap between ground state and first non-degenerate excited state.
-    
-    Args:
-        eigenvalues: Sorted array of eigenvalues (ascending)
-        tol: Tolerance for considering eigenvalues as degenerate
-        
-    Returns:
-        Tuple of (gap, degeneracy) where:
-        - gap: Energy difference to first non-degenerate excited state
-        - degeneracy: Number of degenerate ground states
-    """
+    """Find the gap between ground state and first non-degenerate excited state.
+"""
     E0 = eigenvalues[0]
-    
     # Find all eigenvalues degenerate with ground state
     degeneracy = 1
     for i in range(1, len(eigenvalues)):
@@ -212,22 +178,14 @@ def find_first_gap(eigenvalues: np.ndarray, tol: float = DEGENERACY_TOL) -> Tupl
 def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray, 
                               s_points: np.ndarray, num_edges: int) -> Tuple[float, float, int, int]:
     """
-    Calculates minimum spectral gap handling ground state degeneracy properly.
+    Calculate minimum spectral gap with degeneracy-aware tracking.
     
-    CORRECT METHOD:
-    1. First determine degeneracy at s=1 (pure problem Hamiltonian)
-    2. Find which eigenvalue index k is the first non-degenerate one
-    3. Track gap E_k - E_0 throughout the entire evolution
-    
-    This ensures we're tracking the SAME eigenvalue level throughout,
-    not switching between E_1, E_2, etc. as degeneracies appear.
-    
-    Returns:
-        Tuple of (min_gap, s_at_min_gap, degeneracy_at_s1, max_cut_value)
+    Determines ground state degeneracy k at s=1, then tracks E_k - E_0 
+    throughout entire evolution to find minimum gap.
     """
-    # Step 1: Determine degeneracy at s=1 (problem Hamiltonian only)
-    H_final = H_P  # At s=1, H(1) = H_problem
-    k_vals = min(10, H_final.shape[0])
+    # Determine degeneracy at s=1 (problem Hamiltonian)
+    H_final = H_P
+    k_vals = min(CONFIG['k_vals_check'], H_final.shape[0])
     evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
     _, degeneracy_s1 = find_first_gap(evals_final)
     
@@ -238,27 +196,19 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     E_0 = evals_final[0]
     max_cut_value = int((num_edges - E_0) / 2)
     
-    # Step 2: Track E_k - E_0 where k is the degeneracy at s=1
-    # This is the eigenvalue INDEX we need to track throughout
-    k_index = degeneracy_s1  # If ground state is deg_s1-fold, track E_{deg_s1}
-    
+    # Track E_k - E_0 throughout evolution
+    k_index = degeneracy_s1
     min_gap = np.inf
     s_at_min = 0.0
-    percent_complete = 0
+
     for s in s_points:
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
-        
-        # Get enough eigenvalues to track E_k
-        k_vals_needed = min(k_index + 1, H_s.shape[0])  # Small buffer for safety
+        k_vals_needed = min(k_index + 1, H_s.shape[0])
         eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
         percent_complete = int((s / s_points[-1]) * 100)
-        print(f"\r    Progress: {percent_complete}% complete", end="")
-        
-        # Gap is E_k - E_0 where k is determined by s=1 degeneracy
-        if k_index < len(eigenvalues):
-            gap = eigenvalues[k_index] - eigenvalues[0]
-        else:
-            gap = eigenvalues[-1] - eigenvalues[0]  # Fallback
+        print(f"\r   Current graph progress: {percent_complete}% complete", end="")
+
+        gap = eigenvalues[k_index] - eigenvalues[0] if k_index < len(eigenvalues) else eigenvalues[-1] - eigenvalues[0]
         
         if gap < min_gap:
             min_gap = gap
@@ -271,21 +221,30 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
 # =========================================================================
 
 def main():
-    """Main execution function using complete GENREG graph enumeration."""
+    """Main execution: process selected graphs from GENREG enumeration."""
     print("=" * 70)
     print("  AQC SPECTRAL GAP ANALYSIS FOR 3-REGULAR GRAPHS")
-    print("  Using Complete GENREG Graph Enumeration")
     print("=" * 70)
     print(f"\n📊 Configuration:")
-    print(f"  • S_RESOLUTION: {S_RESOLUTION}")
+    print(f"  • N values: {CONFIG['N_values']}")
+    print(f"  • S_RESOLUTION: {CONFIG['S_resolution']}")
+    print(f"  • k_vals_check: {CONFIG['k_vals_check']}")
     print(f"  • Degeneracy tolerance: {DEGENERACY_TOL}")
-    print(f"  • Source: Complete enumeration from GENREG")
-    print(f"\n📁 GENREG Files:")
-    for N, filename in GENREG_FILES.items():
-        print(f"  • N={N}: {filename}")
+    print(f"  • Output: {OUTPUT_FILENAME}")
+    print(f"\n📁 Graph Selection:")
+    for N in CONFIG['N_values']:
+        selection = CONFIG['graphs_per_N'].get(N, None)
+        if selection is None:
+            print(f"  • N={N}: All graphs from {GENREG_FILES.get(N, 'N/A')}")
+        elif isinstance(selection, int):
+            print(f"  • N={N}: First {selection} graphs from {GENREG_FILES.get(N, 'N/A')}")
+        elif isinstance(selection, range):
+            print(f"  • N={N}: Graphs {selection.start}-{selection.stop-1} from {GENREG_FILES.get(N, 'N/A')}")
+        else:
+            print(f"  • N={N}: Selected graphs {list(selection)} from {GENREG_FILES.get(N, 'N/A')}")
     
     # Initialize
-    s_points = np.linspace(0.0, 1.0, S_RESOLUTION)
+    s_points = np.linspace(0.0, 1.0, CONFIG['S_resolution'])
     data = []
     
     # Start timer
@@ -293,23 +252,47 @@ def main():
     print(f"\n🚀 Starting analysis...")
     print("-" * 70)
     
-    graph_counter = 0  # Global graph counter for unique IDs
+    graph_counter = 0
+    # Handling special specific graphs configs
+    total_graphs = sum(
+        len([i for i in (CONFIG['graphs_per_N'].get(N, None) or range(len(parse_asc_file(GENREG_FILES[N]))))
+             if isinstance(CONFIG['graphs_per_N'].get(N, None), (range, list, set)) or i < (CONFIG['graphs_per_N'].get(N, None) or len(parse_asc_file(GENREG_FILES[N])))])
+        if N in GENREG_FILES else 0 for N in CONFIG['N_values']
+    ) if all(N in GENREG_FILES for N in CONFIG['N_values']) else 0
     
-    # Loop over GENREG files
-    for N, filename in sorted(GENREG_FILES.items()):
+    # Process configured N values
+    for N in sorted(CONFIG['N_values']):
+        if N not in GENREG_FILES:
+            print(f"\n⚠️  Skipping N={N}: No GENREG file specified")
+            continue
+            
+        filename = GENREG_FILES[N]
         print(f"\n▶ Processing N={N} (Hilbert space dimension: 2^{N} = {2**N})")
         print(f"  📖 Reading graphs from {filename}...", end=" ")
         
         # Parse all graphs from file
         try:
-            graphs = parse_asc_file(filename)
-            print(f"✓ Found {len(graphs)} graphs")
+            all_graphs = parse_asc_file(filename)
+            print(f"✓ Found {len(all_graphs)} graphs in file")
         except FileNotFoundError:
             print(f"\n  ❌ Error: File not found: {filename}")
             continue
         except Exception as e:
             print(f"\n  ❌ Error parsing file: {e}")
             continue
+        
+        # Select which graphs to process based on configuration
+        selection = CONFIG['graphs_per_N'].get(N, None)
+        if selection is None:
+            graphs = all_graphs
+        elif isinstance(selection, int):
+            graphs = all_graphs[:selection]
+        elif isinstance(selection, range):
+            graphs = [all_graphs[i] for i in selection if i < len(all_graphs)]
+        else:  # list or other iterable
+            graphs = [all_graphs[i] for i in selection if i < len(all_graphs)]
+        
+        print(f"  🎯 Processing {len(graphs)} selected graphs")
         
         # Pre-calculate the Initial Hamiltonian (H_B) for this N
         print(f"  🔨 Building H_initial matrix {2**N}×{2**N}...", end=" ")
@@ -345,7 +328,7 @@ def main():
             graph_time = time.time() - iter_start
             elapsed_total = time.time() - start_time
             avg_time = elapsed_total / graph_counter
-            eta = avg_time * (104 - graph_counter)  # 104 total graphs
+            eta = avg_time * (total_graphs - graph_counter)
             
             # Progress reporting (every graph)
             print(f"    [{i+1:3d}/{len(graphs)}] Graph #{graph_counter:3d} | "
