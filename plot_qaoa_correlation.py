@@ -20,7 +20,7 @@ import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
 # Configuration
-INPUT_CSV = 'outputs/QAOA_results_N10_p1.csv'
+INPUT_CSV = 'outputs/QAOA_results_N10_p2.csv'
 OUTPUT_DIR = 'outputs/'
 
 # =========================================================================

@@ -34,16 +34,16 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 # =========================================================================
 
 # Input data file (from spectral gap analysis)
-INPUT_CSV = 'outputs/Delta_min_3_regular_N10_res200.csv'
+INPUT_CSV = 'outputs/Delta_min_3_regular_N12_res20.csv'
 
-# QAOA parameters
-P_LAYERS = 1                    # Number of QAOA layers (p)
-MAX_OPTIMIZER_ITERATIONS = 200  # Maximum classical optimizer iterations
+# QAOA parameters - p-sweep mode
+P_VALUES_TO_TEST = list(range(1, 11))  # Test p=1,2,3,...,10
+MAX_OPTIMIZER_ITERATIONS = 500  # Maximum classical optimizer iterations
 OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_results_N10_p2.csv'
+OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to10.csv'
 
 # Simulation backend
 SIMULATOR_METHOD = 'statevector'  # Noiseless simulation
@@ -340,13 +340,15 @@ def run_3node_example():
 
 def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     """
-    Load graphs from spectral gap analysis CSV and run QAOA on each.
+    Load graphs from spectral gap analysis CSV and run QAOA p-sweep on each.
+    
+    Tests multiple p values (1 through 10) for each graph and saves all results.
     
     Args:
         csv_path: Path to CSV file with spectral gap data
     """
     print("=" * 70)
-    print("  QAOA ANALYSIS ON SPECTRAL GAP GRAPHS")
+    print("  QAOA P-SWEEP ANALYSIS ON SPECTRAL GAP GRAPHS")
     print("=" * 70)
     
     # Load data
@@ -355,7 +357,7 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     print(f"   Found {len(df)} graphs for N={df['N'].iloc[0]}")
     
     print(f"\n📊 Configuration:")
-    print(f"   • QAOA layers (p): {P_LAYERS}")
+    print(f"   • QAOA layers to test: p={P_VALUES_TO_TEST}")
     print(f"   • Max optimizer iterations: {MAX_OPTIMIZER_ITERATIONS}")
     print(f"   • Optimizer method: {OPTIMIZER_METHOD}")
     print(f"   • Number of shots: {NUM_SHOTS}")
@@ -380,66 +382,77 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
         
         print(f"\n[{idx+1}/{len(df)}] Graph #{graph_id} | N={n_qubits} | Δ_min={delta_min:.6f} | Optimal_cut={optimal_cut}")
         
-        # Run QAOA
+        # Run QAOA for all p values
         try:
-            qaoa_result = run_qaoa(
-                edges=edges,
-                n_qubits=n_qubits,
-                p=P_LAYERS,
-                max_iter=MAX_OPTIMIZER_ITERATIONS
-            )
-            
-            # Calculate approximation ratio (FIXED: using expected cut)
-            expected_cut = qaoa_result['expected_cut']
-            approx_ratio = expected_cut / optimal_cut
-            
-            # Store results
-            results_data.append({
+            # Storage for this graph's results across all p
+            p_results = {
                 'N': n_qubits,
                 'Graph_ID': graph_id,
                 'Delta_min': delta_min,
                 's_at_min': row['s_at_min'],
                 'Max_degeneracy': row['Max_degeneracy'],
                 'Optimal_cut': optimal_cut,
-                'p_layers': P_LAYERS,
-                'Expected_cut': expected_cut,
-                'Approximation_ratio': approx_ratio,
-                'Most_probable_bitstring': qaoa_result['most_probable_bitstring'],
-                'Most_probable_prob': qaoa_result['most_probable_prob'],
-                'Most_probable_cut': qaoa_result['most_probable_cut'],
-                'Best_measured_bitstring': qaoa_result['best_bitstring'],
-                'Best_measured_cut': qaoa_result['best_cut_value'],
-                'Optimizer_iterations': qaoa_result['num_iterations'],
-                'Final_cost': qaoa_result['final_cost'],
-                'Optimization_time': qaoa_result['optimization_time']
-            })
+            }
             
-            print(f"    ✓ Result: Expected_cut={expected_cut:.2f}/{optimal_cut}, "
-                  f"Ratio={approx_ratio:.4f}, MostProb_cut={qaoa_result['most_probable_cut']}, "
-                  f"Iters={qaoa_result['num_iterations']}, Time={qaoa_result['optimization_time']:.1f}s")
+            # Test each p value
+            for p in P_VALUES_TO_TEST:
+                print(f"    Testing p={p}...", end=" ")
+                p_start = time.time()
+                
+                qaoa_result = run_qaoa(
+                    edges=edges,
+                    n_qubits=n_qubits,
+                    p=p,
+                    max_iter=MAX_OPTIMIZER_ITERATIONS
+                )
+                
+                p_time = time.time() - p_start
+                
+                # Calculate approximation ratio (using expected cut)
+                expected_cut = qaoa_result['expected_cut']
+                approx_ratio = expected_cut / optimal_cut
+                
+                # Store results for this p
+                p_results[f'p{p}_expected_cut'] = expected_cut
+                p_results[f'p{p}_approx_ratio'] = approx_ratio
+                p_results[f'p{p}_most_prob_cut'] = qaoa_result['most_probable_cut']
+                p_results[f'p{p}_most_prob_prob'] = qaoa_result['most_probable_prob']
+                p_results[f'p{p}_iterations'] = qaoa_result['num_iterations']
+                p_results[f'p{p}_time'] = p_time
+                
+                print(f"ratio={approx_ratio:.4f}, time={p_time:.1f}s")
+            
+            results_data.append(p_results)
+            
+            # Summary for this graph
+            best_p = max(P_VALUES_TO_TEST, key=lambda p: p_results[f'p{p}_approx_ratio'])
+            best_ratio = p_results[f'p{best_p}_approx_ratio']
+            print(f"    ✓ Best performance: p={best_p} with ratio={best_ratio:.4f}")
             
         except Exception as e:
             print(f"    ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
             # Store failed result
-            results_data.append({
+            p_results = {
                 'N': n_qubits,
                 'Graph_ID': graph_id,
                 'Delta_min': delta_min,
                 's_at_min': row['s_at_min'],
                 'Max_degeneracy': row['Max_degeneracy'],
                 'Optimal_cut': optimal_cut,
-                'p_layers': P_LAYERS,
-                'Expected_cut': -1,
-                'Approximation_ratio': -1,
-                'Most_probable_bitstring': 'ERROR',
-                'Most_probable_prob': -1,
-                'Most_probable_cut': -1,
-                'Best_measured_bitstring': 'ERROR',
-                'Best_measured_cut': -1,
-                'Optimizer_iterations': -1,
-                'Final_cost': np.nan,
-                'Optimization_time': -1
-            })
+            }
+            # Fill with -1 for all p values
+            for p in P_VALUES_TO_TEST:
+                p_results[f'p{p}_expected_cut'] = -1
+                p_results[f'p{p}_approx_ratio'] = -1
+                p_results[f'p{p}_most_prob_cut'] = -1
+                p_results[f'p{p}_most_prob_prob'] = -1
+                p_results[f'p{p}_iterations'] = -1
+                p_results[f'p{p}_time'] = -1
+            
+            results_data.append(p_results)
     
     total_time = time.time() - total_start_time
     
@@ -449,44 +462,54 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     results_df = pd.DataFrame(results_data)
     results_df.to_csv(OUTPUT_FILENAME, index=False)
     
-    # Statistics
+    # Statistics for each p value
     print(f"\n✅ ANALYSIS COMPLETE!")
     print(f"   • Total graphs processed: {len(results_df)}")
     print(f"   • Total time: {total_time:.2f}s ({total_time/60:.2f} minutes)")
     print(f"   • Average time per graph: {total_time/len(results_df):.2f}s")
     
-    # Filter successful results
-    success_df = results_df[results_df['Approximation_ratio'] >= 0]
+    print(f"\n📈 QAOA Performance Statistics by p:")
     
-    if len(success_df) > 0:
-        print(f"\n📈 QAOA Performance Statistics:")
-        print(f"   • Successful runs: {len(success_df)}/{len(results_df)}")
-        print(f"   • Mean approximation ratio: {success_df['Approximation_ratio'].mean():.6f}")
-        print(f"   • Std approximation ratio: {success_df['Approximation_ratio'].std():.6f}")
-        print(f"   • Min approximation ratio: {success_df['Approximation_ratio'].min():.6f}")
-        print(f"   • Max approximation ratio: {success_df['Approximation_ratio'].max():.6f}")
-        print(f"   • Mean optimizer iterations: {success_df['Optimizer_iterations'].mean():.1f}")
+    for p in P_VALUES_TO_TEST:
+        ratio_col = f'p{p}_approx_ratio'
+        if ratio_col in results_df.columns:
+            valid = results_df[results_df[ratio_col] >= 0]
+            if len(valid) > 0:
+                mean_ratio = valid[ratio_col].mean()
+                std_ratio = valid[ratio_col].std()
+                min_ratio = valid[ratio_col].min()
+                max_ratio = valid[ratio_col].max()
+                print(f"\n   p={p:2d}: Mean ratio = {mean_ratio:.4f} ± {std_ratio:.4f}")
+                print(f"         Min = {min_ratio:.4f}, Max = {max_ratio:.4f}")
+    
+    # Find which p is typically needed for different thresholds
+    print(f"\n🎯 p* Analysis (minimum p to reach threshold):")
+    for threshold in [0.90, 0.95, 0.99]:
+        p_star_values = []
+        for idx, row in results_df.iterrows():
+            for p in P_VALUES_TO_TEST:
+                ratio_col = f'p{p}_approx_ratio'
+                if row[ratio_col] >= threshold:
+                    p_star_values.append(p)
+                    break
+            else:
+                p_star_values.append(11)  # Target not reached
         
-        # Correlation hint
-        print(f"\n🔬 Correlation Analysis Preview:")
-        correlation = success_df[['Delta_min', 'Approximation_ratio']].corr().iloc[0, 1]
-        print(f"   • Correlation(Δ_min, Approx_ratio): {correlation:.6f}")
+        p_star_series = pd.Series(p_star_values)
+        reached = sum(p <= 10 for p in p_star_values)
+        mean_p = p_star_series[p_star_series <= 10].mean() if reached > 0 else np.nan
         
-        # Find hardest graph
-        hardest_idx = success_df['Approximation_ratio'].idxmin()
-        hardest = success_df.loc[hardest_idx]
-        print(f"\n   Hardest graph for QAOA:")
-        print(f"   • Graph ID: {hardest['Graph_ID']}")
-        print(f"   • Approximation ratio: {hardest['Approximation_ratio']:.6f}")
-        print(f"   • Δ_min: {hardest['Delta_min']:.6f}")
-        
-        # Find easiest graph
-        easiest_idx = success_df['Approximation_ratio'].idxmax()
-        easiest = success_df.loc[easiest_idx]
-        print(f"\n   Easiest graph for QAOA:")
-        print(f"   • Graph ID: {easiest['Graph_ID']}")
-        print(f"   • Approximation ratio: {easiest['Approximation_ratio']:.6f}")
-        print(f"   • Δ_min: {easiest['Delta_min']:.6f}")
+        print(f"   Target {threshold:.2f}: {reached}/{len(results_df)} graphs reach it, mean p* = {mean_p:.2f}")
+    
+    # Correlation analysis
+    print(f"\n🔬 Correlation Analysis (Δ_min vs approx_ratio):")
+    for p in P_VALUES_TO_TEST:
+        ratio_col = f'p{p}_approx_ratio'
+        if ratio_col in results_df.columns:
+            valid = results_df[(results_df[ratio_col] >= 0) & (results_df['Delta_min'] > 0)]
+            if len(valid) > 1 and valid[ratio_col].std() > 0:
+                corr = valid[['Delta_min', ratio_col]].corr().iloc[0, 1]
+                print(f"   p={p:2d}: r = {corr:+.4f}")
     
     print(f"\n📁 Data saved to: {OUTPUT_FILENAME}")
     print("=" * 70)
