@@ -17,26 +17,18 @@ METHODOLOGY: Handles ground state degeneracy correctly by:
 """
 
 import numpy as np
-import networkx as nx
-from scipy.linalg import eigh
 import pandas as pd
 import time
-import os
-from typing import List, Tuple
 
-# Import utilities
 from aqc_spectral_utils import (
-    parse_asc_file,
-    parse_scd_file,
-    load_graphs_from_file,
-    DEGENERACY_TOL
-)
-
-# Import shared AQC utilities
-from aqc_spectral_utils import (
+    DEGENERACY_TOL,
     build_H_initial,
     build_H_problem,
-    find_min_gap_with_degeneracy
+    get_aqc_hamiltonian,
+    find_first_gap,
+    find_min_gap_with_degeneracy,
+    load_graphs_from_file,
+    extract_graph_params
 )
 
 # =========================================================================
@@ -44,23 +36,34 @@ from aqc_spectral_utils import (
 # =========================================================================
 
 CONFIG = {
-    'N_values': [12],                     # Which N to process: [10], [12], or [10, 12]
-    'S_resolution': 20,                   # Sampling points along s ∈ [0, 1]
+    'N_values': [10],                     # Which N to process: [10], [12], or [10, 12]
+    'S_resolution': 100,                   # Sampling points along s ∈ [0, 1]
     'graphs_per_N': {                     # Graph selection per N (1-indexed Graph_IDs from CSV)
         10: None,                         # None=all, int=first N, range/list=specific Graph_IDs
-        12: {18},  # Use Graph_ID values from CSV (e.g.,  for deg=10)
+        12: None,  # Use Graph_ID values from CSV (e.g.,  for deg=10)
     },
-    'k_vals_check': 5,                   # Eigenvalues to check for degeneracy
-    'output_suffix': 'scd'                # Optional filename suffix
+    'k_vals_check': 50,                   # Max degeneracy threshold (skip graphs with deg ≥ this)
+    'output_suffix': '-5reg_test',                # Optional filename suffix
+    'degree': 5                        # NEW: Regularity of graphs (e.g., 3 for 3-regular, 4 for 4-regular)
 }
 
 # GENREG data files (supports both .asc and .scd formats)
-GENREG_FILES = {10: '10_3_3.asc', 12: '12_3_3.scd'}
+GENREG_FILES = {
+    10: {
+        3: '10_3_3.asc',
+        4: '10_4_3.asc',
+        5: '10_5_3.asc'
+    },
+    12: {
+        3: '12_3_3.asc'
+    }
+}
 
 def _generate_output_filename():
     """Auto-generate filename from configuration."""
     N_str = f"N{CONFIG['N_values'][0]}" if len(CONFIG['N_values']) == 1 else f"N{'_'.join(map(str, CONFIG['N_values']))}"
-    return f"outputs/Delta_min_3_regular_{N_str}_res{CONFIG['S_resolution']}{CONFIG['output_suffix']}.csv"
+    degree_str = f"{CONFIG['degree']}_regular"
+    return f"outputs/Delta_min_{degree_str}_{N_str}_res{CONFIG['S_resolution']}{CONFIG['output_suffix']}.csv"
 
 OUTPUT_FILENAME = _generate_output_filename()
 
@@ -79,17 +82,19 @@ def main():
     print(f"  • k_vals_check: {CONFIG['k_vals_check']}")
     print(f"  • Degeneracy tolerance: {DEGENERACY_TOL}")
     print(f"  • Output: {OUTPUT_FILENAME}")
+    print(f"  • Graph degree: {CONFIG['degree']}") # NEW: Print degree
     print(f"\n📁 Graph Selection:")
     for N in CONFIG['N_values']:
         selection = CONFIG['graphs_per_N'].get(N, None)
         if selection is None:
-            print(f"  • N={N}: All graphs from {GENREG_FILES.get(N, 'N/A')}")
+            # Update: reference GENREG_FILES with degree
+            print(f"  • N={N}: All graphs from {GENREG_FILES.get(N, {}).get(CONFIG['degree'], 'N/A')}")
         elif isinstance(selection, int):
-            print(f"  • N={N}: First {selection} graphs from {GENREG_FILES.get(N, 'N/A')}")
+            print(f"  • N={N}: First {selection} graphs from {GENREG_FILES.get(N, {}).get(CONFIG['degree'], 'N/A')}")
         elif isinstance(selection, range):
-            print(f"  • N={N}: Graph_IDs {selection.start}-{selection.stop-1} from {GENREG_FILES.get(N, 'N/A')}")
+            print(f"  • N={N}: Graph_IDs {selection.start}-{selection.stop-1} from {GENREG_FILES.get(N, {}).get(CONFIG['degree'], 'N/A')}")
         else:
-            print(f"  • N={N}: Graph_IDs {sorted(selection)} from {GENREG_FILES.get(N, 'N/A')}")
+            print(f"  • N={N}: Graph_IDs {sorted(selection)} from {GENREG_FILES.get(N, {}).get(CONFIG['degree'], 'N/A')}")
     
     # Initialize
     s_points = np.linspace(0.0, 1.0, CONFIG['S_resolution'])
@@ -100,22 +105,24 @@ def main():
     print(f"\n🚀 Starting analysis...")
     print("-" * 70)
     
-    graph_counter = 0
-    # Handling special specific graphs configs
+    graph_counter = 0 # Initialize graph_counter
+
     total_graphs = sum(
-        len([i for i in (CONFIG['graphs_per_N'].get(N, None) or range(len(parse_asc_file(GENREG_FILES[N]))))
-             if isinstance(CONFIG['graphs_per_N'].get(N, None), (range, list, set)) or i < (CONFIG['graphs_per_N'].get(N, None) or len(parse_asc_file(GENREG_FILES[N])))])
+        len([i for i in (CONFIG['graphs_per_N'].get(N, None) or range(len(load_graphs_from_file(GENREG_FILES[N][CONFIG['degree']]))))
+             if isinstance(CONFIG['graphs_per_N'].get(N, None), (range, list, set)) or i < (CONFIG['graphs_per_N'].get(N, None) or len(load_graphs_from_file(GENREG_FILES[N][CONFIG['degree']])))])
         if N in GENREG_FILES else 0 for N in CONFIG['N_values']
     ) if all(N in GENREG_FILES for N in CONFIG['N_values']) else 0
     
     # Process configured N values
     for N in sorted(CONFIG['N_values']):
-        if N not in GENREG_FILES:
-            print(f"\n⚠️  Skipping N={N}: No GENREG file specified")
+        degree = CONFIG['degree'] # Get degree from config
+        
+        if N not in GENREG_FILES or degree not in GENREG_FILES[N]:
+            print(f"\n⚠️  Skipping N={N}, deg={degree}: No GENREG file specified")
             continue
             
-        filename = GENREG_FILES[N]
-        print(f"\n▶ Processing N={N} (Hilbert space dimension: 2^{N} = {2**N})")
+        filename = GENREG_FILES[N][degree] # Retrieve filename using N and degree
+        print(f"\n▶ Processing N={N}, deg={degree} (Hilbert space dimension: 2^{N} = {2**N})")
         print(f"  📖 Reading graphs from {filename}...", end=" ")
         
         # Parse all graphs from file (supports .asc and .scd)
@@ -155,7 +162,7 @@ def main():
         H_B = build_H_initial(N)
         print("✓")
         
-        num_edges = 3 * N // 2  # For 3-regular graphs
+        num_edges = degree * N // 2  # Calculate num_edges dynamically based on degree
         
         # Process each graph sequentially
         graph_start_time = time.time()
