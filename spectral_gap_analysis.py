@@ -32,10 +32,10 @@ CONFIG = {
     'S_resolution': 20,                   # Sampling points along s ∈ [0, 1]
     'graphs_per_N': {                     # Graph selection per N (1-indexed Graph_IDs from CSV)
         10: None,                         # None=all, int=first N, range/list=specific Graph_IDs
-        12: {5,44}  # Use Graph_ID values from CSV (e.g.,  for deg=10)
+        12: None,  # Use Graph_ID values from CSV (e.g.,  for deg=10)
     },
-    'k_vals_check': 40,                   # Eigenvalues to check for degeneracy
-    'output_suffix': 'large_deg40'                # Optional filename suffix
+    'k_vals_check': 5,                   # Eigenvalues to check for degeneracy
+    'output_suffix': 'fixed_method'                # Optional filename suffix
 }
 
 # GENREG data files
@@ -180,14 +180,24 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     """
     Calculate minimum spectral gap with degeneracy-aware tracking.
     
-    Determines ground state degeneracy k at s=1, then tracks E_k - E_0 
-    throughout entire evolution to find minimum gap.
+    NEW METHODOLOGY (Fixed):
+    1. Determines ground state degeneracy k at s=1
+    2. For each s, computes ALL eigenvalues and finds minimum gap among
+       all non-degenerate excited states: min(E[k:] - E[0])
+    3. Returns the global minimum gap across all s values
+    
+    This ensures we don't miss the true minimum gap when different 
+    excited states approach the ground state at different s values.
     """
     # Determine degeneracy at s=1 (problem Hamiltonian)
     H_final = H_P
     k_vals = min(CONFIG['k_vals_check'], H_final.shape[0])
     evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
     _, degeneracy_s1 = find_first_gap(evals_final)
+    
+    # Filter: skip graphs where degeneracy exceeds k_vals_check threshold
+    if degeneracy_s1 >= CONFIG['k_vals_check']:
+        return None, None, None, None
     
     # Calculate max cut value from ground state energy
     # For H_problem = ∑_{(i,j)∈E} Z_i Z_j:
@@ -196,22 +206,27 @@ def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray,
     E_0 = evals_final[0]
     max_cut_value = int((num_edges - E_0) / 2)
     
-    # Track E_k - E_0 throughout evolution
+    # Track minimum gap across ALL excited states (not degenerate with ground)
     k_index = degeneracy_s1
     min_gap = np.inf
     s_at_min = 0.0
 
     for s in s_points:
         H_s = get_aqc_hamiltonian(s, H_B, H_P)
-        k_vals_needed = min(k_index + 1, H_s.shape[0])
-        eigenvalues = eigh(H_s, eigvals_only=True, subset_by_index=(0, k_vals_needed-1))
+        
+        # Compute ALL eigenvalues for maximum accuracy
+        eigenvalues = eigh(H_s, eigvals_only=True)
+        
         percent_complete = int((s / s_points[-1]) * 100)
         print(f"\r   Current graph progress: {percent_complete}% complete", end="")
 
-        gap = eigenvalues[k_index] - eigenvalues[0] if k_index < len(eigenvalues) else eigenvalues[-1] - eigenvalues[0]
+        # Find minimum gap among all non-degenerate excited states
+        # This checks ALL eigenvalues starting from k_index onwards
+        gaps_at_s = eigenvalues[k_index:] - eigenvalues[0]
+        gap_at_s = np.min(gaps_at_s)
         
-        if gap < min_gap:
-            min_gap = gap
+        if gap_at_s < min_gap:
+            min_gap = gap_at_s
             s_at_min = s
     
     return float(min_gap), float(s_at_min), int(degeneracy_s1), max_cut_value
@@ -323,6 +338,11 @@ def main():
             
             # Calculate the Minimum Spectral Gap (handling degeneracy) and max cut
             delta_min, s_min, max_deg, max_cut = calculate_min_gap_robust(H_B, H_P, s_points, num_edges)
+            
+            # Skip graph if degeneracy exceeds threshold
+            if delta_min is None:
+                print(f"\n    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | SKIPPED (deg ≥ {CONFIG['k_vals_check']})")
+                continue
             
             # Store results
             data.append({

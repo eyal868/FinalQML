@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/FinalQML.iml" filepath="$PROJECT_DIR$/.idea/FinalQML.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/QAOA-SpectralGap-MaxCut.iml" filepath="$PROJECT_DIR$/.idea/QAOA-SpectralGap-MaxCut.iml" />
     </modules>
   </component>
 </project>
