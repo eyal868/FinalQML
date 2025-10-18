@@ -360,7 +360,7 @@ def extract_graph_params(filename: str) -> Tuple[int, int, int]:
         Tuple of (n, k, girth) where n is vertices, k is degree, girth is minimum cycle length
         
     Examples:
-        >>> extract_graph_params("12_3_3.scd")
+        >>> extract_graph_params("graphs_rawdata/12_3_3.scd")
         (12, 3, 3)
         >>> extract_graph_params("/path/to/10_3_3.asc")
         (10, 3, 3)
@@ -421,7 +421,7 @@ def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
         List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
         
     Example:
-        >>> graphs = parse_asc_file("12_3_3.asc")
+        >>> graphs = parse_asc_file("graphs_rawdata/12_3_3.asc")
         >>> len(graphs)  # Number of graphs in file
         85
         >>> graphs[0]  # First graph's edge list
@@ -522,7 +522,7 @@ def parse_scd_file(filename: str, n: Optional[int] = None, k: Optional[int] = No
         List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
         
     Example:
-        >>> graphs = parse_scd_file("12_3_3.scd")
+        >>> graphs = parse_scd_file("graphs_rawdata/12_3_3.scd")
         >>> len(graphs)  # Number of graphs
         85
         >>> graphs[0]  # First graph's edge list
@@ -581,8 +581,8 @@ def load_graphs_from_file(filename: str) -> List[List[Tuple[int, int]]]:
         ValueError: If file extension is not .asc or .scd
         
     Example:
-        >>> graphs = load_graphs_from_file("12_3_3.scd")  # Loads SCD
-        >>> graphs = load_graphs_from_file("10_3_3.asc")  # Loads ASC
+        >>> graphs = load_graphs_from_file("graphs_rawdata/12_3_3.scd")  # Loads SCD
+        >>> graphs = load_graphs_from_file("graphs_rawdata/10_3_3.asc")  # Loads ASC
         >>> len(graphs)
         85
     """
