@@ -273,7 +273,8 @@ def analyze_spectrum_for_visualization(
     H_B: np.ndarray,
     H_P: np.ndarray,
     s_points: np.ndarray,
-    num_edges: int
+    num_edges: int,
+    max_degeneracy_check: int = 40
 ) -> dict:
     """
     Comprehensive spectrum analysis for visualization purposes.
@@ -286,6 +287,8 @@ def analyze_spectrum_for_visualization(
         H_P: Problem Hamiltonian matrix
         s_points: Array of s values to sample
         num_edges: Number of edges in the graph
+        max_degeneracy_check: Maximum number of eigenvalues to check for degeneracy
+                              (default 100 should cover most cases)
         
     Returns:
         Dictionary containing:
@@ -301,8 +304,9 @@ def analyze_spectrum_for_visualization(
     # Get full spectrum evolution
     all_eigenvalues = compute_spectrum_evolution(H_B, H_P, s_points)
     
-    # Get degeneracy at s=1
-    evals_final = eigh(H_P, eigvals_only=True, subset_by_index=(0, min(10, H_P.shape[0]) - 1))
+    # Get degeneracy at s=1 - check enough eigenvalues to detect high degeneracy
+    k_vals_to_check = min(max_degeneracy_check, H_P.shape[0])
+    evals_final = eigh(H_P, eigvals_only=True, subset_by_index=(0, k_vals_to_check - 1))
     _, degeneracy = find_first_gap(evals_final)
     
     # Calculate max cut value
