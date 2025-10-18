@@ -558,3 +558,38 @@ def parse_scd_file(filename: str, n: Optional[int] = None, k: Optional[int] = No
     
     return graphs
 
+
+def load_graphs_from_file(filename: str) -> List[List[Tuple[int, int]]]:
+    """
+    Load graphs from GENREG file (supports both .asc and .scd formats).
+    
+    Automatically detects file format based on extension and calls the
+    appropriate parser. This is the recommended way to load graphs as it
+    provides format-agnostic loading.
+    
+    Args:
+        filename: Path to .asc or .scd file
+        
+    Returns:
+        List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
+        
+    Raises:
+        ValueError: If file extension is not .asc or .scd
+        
+    Example:
+        >>> graphs = load_graphs_from_file("12_3_3.scd")  # Loads SCD
+        >>> graphs = load_graphs_from_file("10_3_3.asc")  # Loads ASC
+        >>> len(graphs)
+        85
+    """
+    import os
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    
+    if ext == '.asc':
+        return parse_asc_file(filename)
+    elif ext == '.scd':
+        return parse_scd_file(filename)
+    else:
+        raise ValueError(f"Unsupported file format: {ext}. Expected .asc or .scd")
+

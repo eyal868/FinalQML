@@ -2,10 +2,6 @@
 
 Analysis of minimum spectral gap (Δ_min) for the Adiabatic Quantum Computing Hamiltonian on Max-Cut problems for 3-regular graphs. Studies the connection between Δ_min and QAOA performance, where AQC runtime scales as **T ∝ 1/(Δ_min)²**.
 
-## Key Innovation
-
-**Degeneracy-Aware Gap Calculation**: Correctly tracks **E_k - E_0** (where k = degeneracy at s=1) throughout evolution, not just E_1 - E_0. This yields physically meaningful gaps (~1.8) instead of near-zero artifacts (~0.002).
-
 ## Quick Start
 
 ### Installation

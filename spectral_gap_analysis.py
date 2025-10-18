@@ -25,7 +25,12 @@ import os
 from typing import List, Tuple
 
 # Import utilities
-from aqc_spectral_utils import parse_asc_file, parse_scd_file, DEGENERACY_TOL
+from aqc_spectral_utils import (
+    parse_asc_file,
+    parse_scd_file,
+    load_graphs_from_file,
+    DEGENERACY_TOL
+)
 
 # Import shared AQC utilities
 from aqc_spectral_utils import (
@@ -60,31 +65,7 @@ def _generate_output_filename():
 OUTPUT_FILENAME = _generate_output_filename()
 
 # =========================================================================
-# 2. GENREG FILE PARSING
-# =========================================================================
-
-def load_graphs_from_file(filename: str) -> List[List[Tuple[int, int]]]:
-    """
-    Load graphs from GENREG file (supports both .asc and .scd formats).
-    
-    Args:
-        filename: Path to .asc or .scd file
-        
-    Returns:
-        List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
-    """
-    _, ext = os.path.splitext(filename)
-    ext = ext.lower()
-    
-    if ext == '.asc':
-        return parse_asc_file(filename)
-    elif ext == '.scd':
-        return parse_scd_file(filename)
-    else:
-        raise ValueError(f"Unsupported file format: {ext}. Expected .asc or .scd")
-
-# =========================================================================
-# 3. MAIN EXECUTION
+# 2. MAIN EXECUTION
 # =========================================================================
 
 def main():

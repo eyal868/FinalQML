@@ -22,10 +22,10 @@ from aqc_spectral_utils import (
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different graphs
 # ============================================================================
-CSV_FILENAME = "outputs/Delta_min_3_regular_N12_res20fixed_method.csv"
-GRAPH_ID = 18  # Which graph from the CSV to visualize
-S_RESOLUTION = 100  # Number of points for s interpolation
-MAX_EIGENVALUES_TO_PLOT = 10  # Show only first N eigenvalues (None for all)
+CSV_FILENAME = "outputs/Delta_min_3_regular_N12_res20.csv"
+GRAPH_ID = 44  # Which graph from the CSV to visualize
+S_RESOLUTION = 50  # Number of points for s interpolation
+MAX_EIGENVALUES_TO_PLOT = 50  # Show only first N eigenvalues (None for all)
 # ============================================================================
 
 def load_graph_from_csv(csv_filename, graph_id):
@@ -171,7 +171,7 @@ ax.legend(fontsize=12, loc='best')
 ax.set_xlim(0, 1)
 
 plt.tight_layout()
-filename = f"outputs/example_full_spectrum_N{N}_graph{GRAPH_ID}.png"
+filename = f"outputs/example_full_spectrum_N{N}_graph{GRAPH_ID}--------.png"
 plt.savefig(filename, dpi=200, bbox_inches='tight')
 print(f"\n📊 Plot saved to: {filename}")
 plt.show()
