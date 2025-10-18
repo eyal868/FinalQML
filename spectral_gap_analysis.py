@@ -23,6 +23,13 @@ import pandas as pd
 import time
 from typing import List, Tuple
 
+# Import shared AQC utilities
+from aqc_spectral_utils import (
+    build_H_initial,
+    build_H_problem,
+    find_min_gap_with_degeneracy
+)
+
 # =========================================================================
 # 1. CONFIGURATION PARAMETERS
 # =========================================================================
@@ -40,7 +47,7 @@ CONFIG = {
 
 # GENREG data files
 GENREG_FILES = {10: '10_3_3.asc', 12: '12_3_3.asc'}
-DEGENERACY_TOL = 1e-8
+
 def _generate_output_filename():
     """Auto-generate filename from configuration."""
     N_str = f"N{CONFIG['N_values'][0]}" if len(CONFIG['N_values']) == 1 else f"N{'_'.join(map(str, CONFIG['N_values']))}"
@@ -49,54 +56,7 @@ def _generate_output_filename():
 OUTPUT_FILENAME = _generate_output_filename()
 
 # =========================================================================
-# 2. PAULI MATRICES
-# =========================================================================
-
-SIGMA_X = np.array([[0, 1], [1, 0]], dtype=complex)
-SIGMA_Z = np.array([[1, 0], [0, -1]], dtype=complex)
-IDENTITY = np.eye(2, dtype=complex)
-
-# =========================================================================
-# 3. HAMILTONIAN CONSTRUCTION
-# =========================================================================
-
-def pauli_tensor_product(op_list: List[np.ndarray]) -> np.ndarray:
-    """Tensor product of 2x2 matrices."""
-    result = op_list[0]
-    for op in op_list[1:]:
-        result = np.kron(result, op)
-    return result
-
-def get_pauli_term(N: int, pauli_type: str, index1: int, index2: int = -1) -> np.ndarray:
-    """Generate N-qubit operator: X_i or Z_i⊗Z_j."""
-    operators = [IDENTITY] * N
-    if pauli_type == 'X':
-        operators[index1] = SIGMA_X
-    elif pauli_type == 'ZZ':
-        operators[index1] = SIGMA_Z
-        operators[index2] = SIGMA_Z
-    return pauli_tensor_product(operators)
-
-def build_H_initial(N: int) -> np.ndarray:
-    """H_initial = -∑ᵢ X̂ᵢ (transverse field mixer)"""
-    H_B = np.zeros((2**N, 2**N), dtype=complex)
-    for i in range(N):
-        H_B += get_pauli_term(N, 'X', i)
-    return -H_B
-
-def build_H_problem(N: int, edges: List[Tuple[int, int]]) -> np.ndarray:
-    """H_problem = ∑₍ᵢ,ⱼ₎∈E ẐᵢẐⱼ (Max-Cut Hamiltonian)"""
-    H_P = np.zeros((2**N, 2**N), dtype=complex)
-    for u, v in edges:
-        H_P += get_pauli_term(N, 'ZZ', u, v)
-    return H_P
-
-def get_aqc_hamiltonian(s: float, H_B: np.ndarray, H_P: np.ndarray) -> np.ndarray:
-    """H(s) = (1-s)·H_initial + s·H_problem"""
-    return (1 - s) * H_B + s * H_P
-
-# =========================================================================
-# 4. GENREG FILE PARSING
+# 2. GENREG FILE PARSING
 # =========================================================================
 
 def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
@@ -154,85 +114,7 @@ def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
     return sorted(edges)
 
 # =========================================================================
-# 5. SPECTRAL GAP CALCULATION
-# =========================================================================
-
-def find_first_gap(eigenvalues: np.ndarray, tol: float = DEGENERACY_TOL) -> Tuple[float, int]:
-    """Find the gap between ground state and first non-degenerate excited state.
-"""
-    E0 = eigenvalues[0]
-    # Find all eigenvalues degenerate with ground state
-    degeneracy = 1
-    for i in range(1, len(eigenvalues)):
-        if abs(eigenvalues[i] - E0) < tol:
-            degeneracy += 1
-        else:
-            # Found first non-degenerate level
-            gap = eigenvalues[i] - E0
-            return gap, degeneracy
-    
-    # All eigenvalues are degenerate (shouldn't happen in practice)
-    return 0.0, len(eigenvalues)
-
-
-def calculate_min_gap_robust(H_B: np.ndarray, H_P: np.ndarray, 
-                              s_points: np.ndarray, num_edges: int) -> Tuple[float, float, int, int]:
-    """
-    Calculate minimum spectral gap with degeneracy-aware tracking.
-    
-    NEW METHODOLOGY (Fixed):
-    1. Determines ground state degeneracy k at s=1
-    2. For each s, computes ALL eigenvalues and finds minimum gap among
-       all non-degenerate excited states: min(E[k:] - E[0])
-    3. Returns the global minimum gap across all s values
-    
-    This ensures we don't miss the true minimum gap when different 
-    excited states approach the ground state at different s values.
-    """
-    # Determine degeneracy at s=1 (problem Hamiltonian)
-    H_final = H_P
-    k_vals = min(CONFIG['k_vals_check'], H_final.shape[0])
-    evals_final = eigh(H_final, eigvals_only=True, subset_by_index=(0, k_vals-1))
-    _, degeneracy_s1 = find_first_gap(evals_final)
-    
-    # Filter: skip graphs where degeneracy exceeds k_vals_check threshold
-    if degeneracy_s1 >= CONFIG['k_vals_check']:
-        return None, None, None, None
-    
-    # Calculate max cut value from ground state energy
-    # For H_problem = ∑_{(i,j)∈E} Z_i Z_j:
-    # - Edges in cut contribute -1, edges not in cut contribute +1
-    # - Cut_value = (total_edges - E_0) / 2
-    E_0 = evals_final[0]
-    max_cut_value = int((num_edges - E_0) / 2)
-    
-    # Track minimum gap across ALL excited states (not degenerate with ground)
-    k_index = degeneracy_s1
-    min_gap = np.inf
-    s_at_min = 0.0
-
-    for s in s_points:
-        H_s = get_aqc_hamiltonian(s, H_B, H_P)
-        
-        # Compute ALL eigenvalues for maximum accuracy
-        eigenvalues = eigh(H_s, eigvals_only=True)
-        
-        percent_complete = int((s / s_points[-1]) * 100)
-        print(f"\r   Current graph progress: {percent_complete}% complete", end="")
-
-        # Find minimum gap among all non-degenerate excited states
-        # This checks ALL eigenvalues starting from k_index onwards
-        gaps_at_s = eigenvalues[k_index:] - eigenvalues[0]
-        gap_at_s = np.min(gaps_at_s)
-        
-        if gap_at_s < min_gap:
-            min_gap = gap_at_s
-            s_at_min = s
-    
-    return float(min_gap), float(s_at_min), int(degeneracy_s1), max_cut_value
-
-# =========================================================================
-# 6. MAIN EXECUTION
+# 3. MAIN EXECUTION
 # =========================================================================
 
 def main():
@@ -337,7 +219,9 @@ def main():
             H_P = build_H_problem(N, edges)
             
             # Calculate the Minimum Spectral Gap (handling degeneracy) and max cut
-            delta_min, s_min, max_deg, max_cut = calculate_min_gap_robust(H_B, H_P, s_points, num_edges)
+            result = find_min_gap_with_degeneracy(H_B, H_P, s_points, num_edges, 
+                                                   CONFIG['k_vals_check'], verbose=True)
+            delta_min, s_min, max_deg, max_cut, _ = result
             
             # Skip graph if degeneracy exceeds threshold
             if delta_min is None:
