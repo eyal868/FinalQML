@@ -338,3 +338,223 @@ def analyze_spectrum_for_visualization(
         'max_cut_value': int(max_cut_value)
     }
 
+# =========================================================================
+# GRAPH FILE I/O
+# =========================================================================
+
+def extract_graph_params(filename: str) -> Tuple[int, int, int]:
+    """
+    Extract graph parameters from GENREG filename format.
+    
+    GENREG filenames follow the pattern: N_k_g.ext
+    where N = number of vertices, k = degree, g = girth
+    
+    Args:
+        filename: Graph filename (e.g., "12_3_3.asc" or "path/to/10_3_3.scd")
+        
+    Returns:
+        Tuple of (n, k, girth) where n is vertices, k is degree, girth is minimum cycle length
+        
+    Examples:
+        >>> extract_graph_params("12_3_3.scd")
+        (12, 3, 3)
+        >>> extract_graph_params("/path/to/10_3_3.asc")
+        (10, 3, 3)
+    """
+    import os
+    basename = os.path.basename(filename)
+    # Remove extension
+    name_without_ext = basename.rsplit('.', 1)[0]
+    # Split by underscore
+    parts = name_without_ext.split('_')
+    
+    if len(parts) != 3:
+        raise ValueError(f"Invalid filename format: {filename}. Expected N_k_g.ext")
+    
+    try:
+        n = int(parts[0])
+        k = int(parts[1])
+        girth = int(parts[2])
+        return n, k, girth
+    except ValueError as e:
+        raise ValueError(f"Could not parse integers from filename {filename}: {e}")
+
+
+def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
+    """
+    Convert adjacency dictionary to edge list (avoiding duplicates).
+    
+    Args:
+        adj_dict: Dictionary mapping vertex -> list of neighbors (1-indexed)
+        
+    Returns:
+        List of edges as (v1, v2) tuples (0-indexed), with v1 < v2
+    """
+    edges = []
+    seen = set()
+    
+    for v, neighbors in adj_dict.items():
+        for n in neighbors:
+            edge = (min(v, n), max(v, n))
+            if edge not in seen:
+                seen.add(edge)
+                # Convert to 0-indexed
+                edges.append((edge[0] - 1, edge[1] - 1))
+    return sorted(edges)
+
+
+def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
+    """
+    Parse GENREG .asc file and return list of graphs as 0-indexed edge lists.
+    
+    The .asc format contains human-readable adjacency lists with additional
+    metadata (Taillenweite = girth, Ordnung = automorphism group order).
+    
+    Args:
+        filename: Path to .asc file
+        
+    Returns:
+        List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
+        
+    Example:
+        >>> graphs = parse_asc_file("12_3_3.asc")
+        >>> len(graphs)  # Number of graphs in file
+        85
+        >>> graphs[0]  # First graph's edge list
+        [(0, 1), (0, 2), (0, 3), ...]
+    """
+    graphs = []
+    current_graph = {}
+    in_adjacency = False
+    
+    with open(filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+            
+            if line.startswith('Graph'):
+                # Starting a new graph
+                if current_graph:
+                    # Save previous graph
+                    graphs.append(adjacency_to_edges(current_graph))
+                current_graph = {}
+                in_adjacency = True
+                
+            elif line.startswith('Taillenweite:'):
+                in_adjacency = False
+            elif in_adjacency and ':' in line:
+                try:
+                    parts = line.split(':')
+                    vertex = int(parts[0].strip())
+                    neighbors = [int(x) for x in parts[1].split()]
+                    current_graph[vertex] = neighbors
+                except (ValueError, IndexError):
+                    continue
+    
+    # Don't forget the last graph
+    if current_graph:
+        graphs.append(adjacency_to_edges(current_graph))
+    
+    return graphs
+
+
+def shortcode_to_edges(code: List[int], n: int, k: int) -> List[Tuple[int, int]]:
+    """
+    Convert GENREG shortcode representation to edge list.
+    
+    The shortcode format lists, for each vertex v in order, only the neighbors
+    w where w > v. This avoids duplicate edge entries.
+    
+    Args:
+        code: Shortcode array (1-indexed vertex numbers)
+        n: Number of vertices in graph
+        k: Degree of each vertex (k-regular graph)
+        
+    Returns:
+        List of edges as (v1, v2) tuples (0-indexed), sorted
+        
+    Example:
+        >>> # Complete graph K4: edges (1-2), (1-3), (1-4), (2-3), (2-4), (3-4)
+        >>> shortcode_to_edges([2, 3, 4, 3, 4, 4], 4, 3)
+        [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+    """
+    edges = []
+    degree_count = [0] * n  # Track degree of each vertex
+    v = 0  # Current vertex (0-indexed)
+    
+    for w_1indexed in code:
+        w = int(w_1indexed) - 1  # Convert to 0-indexed (ensure plain int)
+        
+        # Find the current vertex (one that hasn't reached degree k)
+        while v < n and degree_count[v] == k:
+            v += 1
+        
+        if v >= n:
+            # Should not happen with valid data
+            break
+        
+        # Create edge (v, w) with plain Python ints
+        edges.append((int(v), int(w)))
+        degree_count[v] += 1
+        degree_count[w] += 1
+    
+    return sorted(edges)
+
+
+def parse_scd_file(filename: str, n: Optional[int] = None, k: Optional[int] = None) -> List[List[Tuple[int, int]]]:
+    """
+    Parse GENREG .scd (shortcode) binary file and return list of graphs.
+    
+    The .scd format uses differential compression:
+    - First value: number of common prefix elements with previous code
+    - Remaining values: new/different elements of the code
+    - First graph always starts with 0 (no common prefix)
+    
+    Args:
+        filename: Path to .scd file
+        n: Number of vertices (auto-detected from filename if None)
+        k: Vertex degree (auto-detected from filename if None)
+        
+    Returns:
+        List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
+        
+    Example:
+        >>> graphs = parse_scd_file("12_3_3.scd")
+        >>> len(graphs)  # Number of graphs
+        85
+        >>> graphs[0]  # First graph's edge list
+        [(0, 1), (0, 2), (0, 3), ...]
+    """
+    # Auto-detect parameters from filename if not provided
+    if n is None or k is None:
+        n_auto, k_auto, _ = extract_graph_params(filename)
+        n = n if n is not None else n_auto
+        k = k if k is not None else k_auto
+    
+    num_edges = n * k // 2
+    
+    # Read binary file
+    with open(filename, 'rb') as f:
+        values = np.fromfile(f, dtype=np.uint8)
+    
+    graphs = []
+    read_pos = 0
+    code = []
+    
+    while read_pos < len(values):
+        # Read common prefix length
+        samebits = int(values[read_pos])
+        read_pos += 1
+        
+        # Calculate how many new values to read
+        readbits = num_edges - samebits
+        
+        # Update code: keep first 'samebits' elements, append new values
+        code = code[:samebits] + list(values[read_pos:read_pos + readbits])
+        read_pos += readbits
+        
+        # Convert shortcode to edge list
+        edges = shortcode_to_edges(code, n, k)
+        graphs.append(edges)
+    
+    return graphs
+

@@ -21,7 +21,11 @@ import networkx as nx
 from scipy.linalg import eigh
 import pandas as pd
 import time
+import os
 from typing import List, Tuple
+
+# Import utilities
+from aqc_spectral_utils import parse_asc_file, parse_scd_file, DEGENERACY_TOL
 
 # Import shared AQC utilities
 from aqc_spectral_utils import (
@@ -39,14 +43,14 @@ CONFIG = {
     'S_resolution': 20,                   # Sampling points along s ∈ [0, 1]
     'graphs_per_N': {                     # Graph selection per N (1-indexed Graph_IDs from CSV)
         10: None,                         # None=all, int=first N, range/list=specific Graph_IDs
-        12: None,  # Use Graph_ID values from CSV (e.g.,  for deg=10)
+        12: {18},  # Use Graph_ID values from CSV (e.g.,  for deg=10)
     },
     'k_vals_check': 5,                   # Eigenvalues to check for degeneracy
-    'output_suffix': 'fixed_method'                # Optional filename suffix
+    'output_suffix': 'scd'                # Optional filename suffix
 }
 
-# GENREG data files
-GENREG_FILES = {10: '10_3_3.asc', 12: '12_3_3.asc'}
+# GENREG data files (supports both .asc and .scd formats)
+GENREG_FILES = {10: '10_3_3.asc', 12: '12_3_3.scd'}
 
 def _generate_output_filename():
     """Auto-generate filename from configuration."""
@@ -59,59 +63,25 @@ OUTPUT_FILENAME = _generate_output_filename()
 # 2. GENREG FILE PARSING
 # =========================================================================
 
-def parse_asc_file(filename: str) -> List[List[Tuple[int, int]]]:
-    """Parse GENREG .asc file, return list of graphs as 0-indexed edge lists."""
-    graphs = []
-    current_graph = {}
-    in_adjacency = False
-    
-    with open(filename, 'r') as f:
-        for line in f:
-            line = line.strip()
-            
-            if line.startswith('Graph'):
-                # Starting a new graph
-                if current_graph:
-                    # Save previous graph
-                    graphs.append(adjacency_to_edges(current_graph))
-                current_graph = {}
-                in_adjacency = True
-                
-            elif line.startswith('Taillenweite:'):
-                in_adjacency = False
-            elif in_adjacency and ':' in line:
-                try:
-                    parts = line.split(':')
-                    vertex = int(parts[0].strip())
-                    neighbors = [int(x) for x in parts[1].split()]
-                    current_graph[vertex] = neighbors
-                except (ValueError, IndexError):
-                    continue
-    
-    if current_graph:
-        graphs.append(adjacency_to_edges(current_graph))
-    return graphs
-
-def adjacency_to_edges(adj_dict: dict) -> List[Tuple[int, int]]:
+def load_graphs_from_file(filename: str) -> List[List[Tuple[int, int]]]:
     """
-    Convert adjacency dictionary to edge list (avoiding duplicates).
+    Load graphs from GENREG file (supports both .asc and .scd formats).
     
     Args:
-        adj_dict: Dictionary mapping vertex -> list of neighbors (1-indexed)
+        filename: Path to .asc or .scd file
         
     Returns:
-        List of edges as (v1, v2) tuples (0-indexed), with v1 < v2
+        List of graphs, where each graph is a list of (v1, v2) edge tuples (0-indexed)
     """
-    edges = []
-    seen = set()
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
     
-    for v, neighbors in adj_dict.items():
-        for n in neighbors:
-            edge = (min(v, n), max(v, n))
-            if edge not in seen:
-                seen.add(edge)
-                edges.append((edge[0] - 1, edge[1] - 1))
-    return sorted(edges)
+    if ext == '.asc':
+        return parse_asc_file(filename)
+    elif ext == '.scd':
+        return parse_scd_file(filename)
+    else:
+        raise ValueError(f"Unsupported file format: {ext}. Expected .asc or .scd")
 
 # =========================================================================
 # 3. MAIN EXECUTION
@@ -167,9 +137,9 @@ def main():
         print(f"\n▶ Processing N={N} (Hilbert space dimension: 2^{N} = {2**N})")
         print(f"  📖 Reading graphs from {filename}...", end=" ")
         
-        # Parse all graphs from file
+        # Parse all graphs from file (supports .asc and .scd)
         try:
-            all_graphs = parse_asc_file(filename)
+            all_graphs = load_graphs_from_file(filename)
             print(f"✓ Found {len(all_graphs)} graphs in file")
         except FileNotFoundError:
             print(f"\n  ❌ Error: File not found: {filename}")
