@@ -20,9 +20,9 @@ from scipy.stats import pearsonr
 import sys
 
 # Configuration
-DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N10_p1to10.csv'
+DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to20.csv'
 OUTPUT_DIR = 'outputs/'
-P_VALUES = list(range(1, 11))  # p=1 to p=10
+P_VALUES = list(range(1, 21))  # p=1 to p=10
 
 # Parse command line arguments
 if len(sys.argv) > 1:
@@ -72,7 +72,7 @@ for idx, p in enumerate(P_VALUES):
     
     # Calculate correlation
     if len(x_valid) > 1 and np.std(y_valid) > 0:
-        corr, pval = pearsonr(x_valid, y_valid)
+        corr, stat_pval = pearsonr(x_valid, y_valid)
         
         # Add trend line
         z = np.polyfit(x_valid, y_valid, 1)
@@ -82,15 +82,15 @@ for idx, p in enumerate(P_VALUES):
         
         # Title with correlation
         title_color = 'green' if abs(corr) > 0.5 else 'orange' if abs(corr) > 0.3 else 'black'
-        ax.set_title(f'p={p}: r={corr:+.3f} (p={pval:.3f})', 
+        ax.set_title(f'layers({p}): r={corr:+.3f} (stat_p={stat_pval:.3f})', 
                      fontsize=11, fontweight='bold', color=title_color)
         
         # Print correlation
-        significance = '***' if pval < 0.001 else '**' if pval < 0.01 else '*' if pval < 0.05 else ''
-        print(f"   p={p:2d}: r={corr:+.4f}, p-value={pval:.4f} {significance}")
+        significance = '***' if stat_pval < 0.001 else '**' if stat_pval < 0.01 else '*' if stat_pval < 0.05 else ''
+        print(f"   layers({p:2d}): r={corr:+.4f}, stat_p-value={stat_pval:.4f} {significance}")
     else:
-        ax.set_title(f'p={p}: No variance', fontsize=11)
-        print(f"   p={p:2d}: No variance in data")
+        ax.set_title(f'layers({p}): No variance', fontsize=11)
+        print(f"   layers({p:2d}): No variance in data")
     
     # Axis labels
     if idx >= 5:  # Bottom row
@@ -109,7 +109,7 @@ for idx, p in enumerate(P_VALUES):
 plt.tight_layout()
 
 # Save figure
-output_file = f"{OUTPUT_DIR}p_sweep_ratio_vs_gap_N{N_value}.png"
+output_file = f"{OUTPUT_DIR}p_sweep_ratio_vs_gap_N{N_value}-20.png"
 plt.savefig(output_file, dpi=300, bbox_inches='tight')
 print(f"\n✅ Figure saved: {output_file}")
 
@@ -123,7 +123,7 @@ for p in P_VALUES:
         std_ratio = valid_ratios.std()
         min_ratio = valid_ratios.min()
         max_ratio = valid_ratios.max()
-        print(f"   p={p:2d}: mean={mean_ratio:.4f}±{std_ratio:.4f}, "
+        print(f"   layers({p:2d}): mean={mean_ratio:.4f}±{std_ratio:.4f}, "
               f"range=[{min_ratio:.4f}, {max_ratio:.4f}]")
 
 print("\n" + "=" * 70)

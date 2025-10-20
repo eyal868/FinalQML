@@ -37,13 +37,13 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 INPUT_CSV = 'outputs/Delta_min_3_regular_N12_res20.csv'
 
 # QAOA parameters - p-sweep mode
-P_VALUES_TO_TEST = list(range(1, 11))  # Test p=1,2,3,...,10
+P_VALUES_TO_TEST = list(range(1, 21))  # Test p=1,2,3,...,10
 MAX_OPTIMIZER_ITERATIONS = 500  # Maximum classical optimizer iterations
 OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to10.csv'
+OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to20.csv'
 
 # Simulation backend
 SIMULATOR_METHOD = 'statevector'  # Noiseless simulation
