@@ -4,7 +4,10 @@
 QAOA p-Sweep: Approximation Ratio vs Spectral Gap
 =========================================================================
 Visualize how the correlation between approximation ratio and spectral gap
-changes across different QAOA depths (p=1 to p=10).
+changes across different QAOA depths.
+
+Automatically detects available p values from the CSV file and creates
+an appropriate subplot grid.
 
 For each p value, show:
 - Scatter plot: Δ_min vs approximation ratio
@@ -18,11 +21,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import pearsonr
 import sys
+import re
 
 # Configuration
 DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to20.csv'
 OUTPUT_DIR = 'outputs/'
-P_VALUES = list(range(1, 21))  # p=1 to p=10
 
 # Parse command line arguments
 if len(sys.argv) > 1:
@@ -42,13 +45,34 @@ print(f"   Found {len(df)} graphs, N={df['N'].iloc[0]}")
 # Extract N for output filename
 N_value = df['N'].iloc[0]
 
-# Create figure with 2×5 subplots
-fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-fig.suptitle(f'Approximation Ratio vs Spectral Gap Across QAOA Depths (N={N_value})', 
-             fontsize=16, fontweight='bold', y=0.98)
+# Auto-detect available p values from column names
+ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
+P_VALUES = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1)) 
+                   for col in ratio_cols])
+max_p = max(P_VALUES)
+min_p = min(P_VALUES)
 
-# Flatten axes for easier iteration
-axes_flat = axes.flatten()
+print(f"   Detected p values: {min_p} to {max_p} ({len(P_VALUES)} total)")
+
+# Calculate optimal subplot grid (prefer wider than tall, max 5 columns)
+n_plots = len(P_VALUES)
+n_cols = min(5, n_plots)
+n_rows = int(np.ceil(n_plots / n_cols))
+
+print(f"   Creating {n_rows}×{n_cols} subplot grid")
+
+# Create figure with dynamic subplot grid
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
+fig.suptitle(f'Approximation Ratio vs Spectral Gap Across QAOA Depths (N={N_value})', 
+             fontsize=16, fontweight='bold', y=0.99)
+
+# Flatten axes for easier iteration (handle both 1D and 2D cases)
+if n_plots == 1:
+    axes_flat = [axes]
+elif n_rows == 1 or n_cols == 1:
+    axes_flat = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+else:
+    axes_flat = axes.flatten()
 
 print(f"\n📊 Correlation Analysis by p:")
 
@@ -92,10 +116,10 @@ for idx, p in enumerate(P_VALUES):
         ax.set_title(f'layers({p}): No variance', fontsize=11)
         print(f"   layers({p:2d}): No variance in data")
     
-    # Axis labels
-    if idx >= 5:  # Bottom row
+    # Axis labels (dynamic based on grid)
+    if idx >= (n_rows - 1) * n_cols:  # Bottom row
         ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=10)
-    if idx % 5 == 0:  # Left column
+    if idx % n_cols == 0:  # Left column
         ax.set_ylabel('Approximation Ratio', fontsize=10)
     
     # Grid
@@ -106,10 +130,14 @@ for idx, p in enumerate(P_VALUES):
     y_max = min(1.05, y_valid.max() + 0.05) if len(y_valid) > 0 else 1.0
     ax.set_ylim([y_min, y_max])
 
+# Hide any unused subplots
+for idx in range(len(P_VALUES), len(axes_flat)):
+    axes_flat[idx].set_visible(False)
+
 plt.tight_layout()
 
-# Save figure
-output_file = f"{OUTPUT_DIR}p_sweep_ratio_vs_gap_N{N_value}-20.png"
+# Save figure with dynamic filename
+output_file = f"{OUTPUT_DIR}p_sweep_ratio_vs_gap_N{N_value}_p{min_p}to{max_p}.png"
 plt.savefig(output_file, dpi=300, bbox_inches='tight')
 print(f"\n✅ Figure saved: {output_file}")
 
@@ -117,14 +145,15 @@ print(f"\n✅ Figure saved: {output_file}")
 print(f"\n📈 Summary Statistics:")
 for p in P_VALUES:
     ratio_col = f'p{p}_approx_ratio'
-    valid_ratios = df[df[ratio_col] >= 0][ratio_col]
-    if len(valid_ratios) > 0:
-        mean_ratio = valid_ratios.mean()
-        std_ratio = valid_ratios.std()
-        min_ratio = valid_ratios.min()
-        max_ratio = valid_ratios.max()
-        print(f"   layers({p:2d}): mean={mean_ratio:.4f}±{std_ratio:.4f}, "
-              f"range=[{min_ratio:.4f}, {max_ratio:.4f}]")
+    if ratio_col in df.columns:
+        valid_ratios = df[df[ratio_col] >= 0][ratio_col]
+        if len(valid_ratios) > 0:
+            mean_ratio = valid_ratios.mean()
+            std_ratio = valid_ratios.std()
+            min_ratio = valid_ratios.min()
+            max_ratio = valid_ratios.max()
+            print(f"   layers({p:2d}): mean={mean_ratio:.4f}±{std_ratio:.4f}, "
+                  f"range=[{min_ratio:.4f}, {max_ratio:.4f}]")
 
 print("\n" + "=" * 70)
 
