@@ -277,71 +277,12 @@ FinalQML/
 
 ---
 
-## Key Findings Summary
-
-1. **QAOA performance correlates with spectral gap**, but the relationship depends on ground state degeneracy
-2. **Optimal QAOA depth for gap studies: p=6** (strongest correlation before optimizer degradation)
-3. **0.90 approximation ratio threshold** is optimal for minimum depth (p*) analysis
-4. **Ground state degeneracy is a confounding variable** - control for it in comparative studies
-5. **Filtering optimization artifacts** significantly improves correlation analysis
-
-See [QAOA_SPECTRAL_GAP_ANALYSIS.md](QAOA_SPECTRAL_GAP_ANALYSIS.md) for complete statistical analysis.
-
----
-
-## Reproducing Published Results
-
-To reproduce the results in the companion paper:
-
-### N=10 Analysis
-```bash
-# 1. Spectral gaps (already computed)
-# Output: outputs/Delta_min_3_regular_N10_res200.csv
-
-# 2. QAOA sweep p=1 to p=10
-python3 qaoa_analysis.py  # Configure: INPUT_CSV for N10, P_VALUES 1-10
-
-# 3. Filter data
-python3 filter_qaoa_monotonic.py outputs/QAOA_p_sweep_N10_p1to10.csv
-
-# 4. Generate plots
-python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10_filtered.csv
-python3 plot_p_star_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10_filtered.csv
-```
-
-### N=12 Full Dataset
-```bash
-# QAOA sweep on all 85 graphs
-python3 qaoa_analysis.py  # Configure: INPUT_CSV for N12, P_VALUES 1-10
-
-# Filter and plot
-python3 filter_qaoa_monotonic.py outputs/QAOA_p_sweep_N12_p1to10.csv
-python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N12_p1to10_filtered.csv
-```
-
-### N=12 Degeneracy-Controlled Subsets
-
-The filtering and analysis scripts automatically process degeneracy-specific files:
-- `QAOA_p_sweep_N12_p1to10_deg_2_only.csv`
-- `QAOA_p_sweep_N12_p1to10_deg_4_only.csv`
-
-To create these subsets, filter the spectral gap CSV by `Max_degeneracy` column before running QAOA analysis.
-
----
-
-## Citation
-
-*[Companion paper reference to be added]*
-
-For academic use, please cite the companion paper and acknowledge this codebase.
-
----
-
 ## References
 
 - Farhi et al., "Quantum Computation by Adiabatic Evolution" (2000)
 - Farhi et al., "A Quantum Approximate Optimization Algorithm" (2014)
-- GENREG database: [reggraphs.html](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html)
+- IBM Qiskit Documentation: [QAOA](https://quantum.cloud.ibm.com/docs/en/tutorials/quantum-approximate-optimization-algorithm)
+- GENREG Regular Graphs: [bayreuth](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html)
 
 ---
 
