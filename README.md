@@ -227,18 +227,6 @@ Both `.asc` and `.scd` formats are supported. The codebase auto-detects format f
 **Filtered results:**
 - Format: Original filename + `_filtered.csv`
 - Example: `QAOA_p_sweep_N10_p1to10_filtered.csv`
-
----
-
-## Detailed Documentation
-
-For in-depth analysis, methodology, and results:
-
-- **[QAOA_SPECTRAL_GAP_ANALYSIS.md](QAOA_SPECTRAL_GAP_ANALYSIS.md)** - Complete correlation analysis, results, and interpretation
-- **[SCD_IMPLEMENTATION_SUMMARY.md](SCD_IMPLEMENTATION_SUMMARY.md)** - Binary graph file format implementation
-- **[FILTERING_SUMMARY.md](FILTERING_SUMMARY.md)** - Monotonic filtering methodology and impact
-- **[QAOA_OPTIMIZATION_CHALLENGES.md](QAOA_OPTIMIZATION_CHALLENGES.md)** - Classical optimizer limitations
-
 ---
 
 ## Project Structure
@@ -267,24 +255,9 @@ FinalQML/
 │
 ├── requirements.txt                   # Dependencies
 ├── README.md                          # This file
-│
-└── Documentation files:
-    ├── QAOA_SPECTRAL_GAP_ANALYSIS.md
-    ├── SCD_IMPLEMENTATION_SUMMARY.md
-    ├── FILTERING_SUMMARY.md
-    └── QAOA_OPTIMIZATION_CHALLENGES.md
+
 ```
 
 ---
 
-## References
-
-- Farhi et al., "Quantum Computation by Adiabatic Evolution" (2000)
-- Farhi et al., "A Quantum Approximate Optimization Algorithm" (2014)
-- IBM Qiskit Documentation: [QAOA](https://quantum.cloud.ibm.com/docs/en/tutorials/quantum-approximate-optimization-algorithm)
-- GENREG Regular Graphs: [bayreuth](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html)
-
----
-
-**Last Updated:** October 2025  
-**Status:** Production-ready, reproducible results
+**Last Updated:** October 2025
