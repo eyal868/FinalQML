@@ -22,7 +22,7 @@ from aqc_spectral_utils import (
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different graphs
 # ============================================================================
-CSV_FILENAME = "outputs/Delta_min_3_regular_N12_res20.csv"
+CSV_FILENAME = "DataOutputs/Delta_min_3_regular_N12_res20.csv"
 GRAPH_ID = 44  # Which graph from the CSV to visualize
 S_RESOLUTION = 50  # Number of points for s interpolation
 MAX_EIGENVALUES_TO_PLOT = 50  # Show only first N eigenvalues (None for all)

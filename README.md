@@ -1,6 +1,10 @@
-# Spectral Gap Analysis for Adiabatic Quantum Computing
+# QAOA Performance and Spectral Gap Analysis
 
-Analysis of minimum spectral gap (Δ_min) for the Adiabatic Quantum Computing Hamiltonian on Max-Cut problems for 3-regular graphs. Studies the connection between Δ_min and QAOA performance, where AQC runtime scales as **T ∝ 1/(Δ_min)²**.
+Analysis of the relationship between QAOA performance and minimum spectral gap (Δ_min) for the Max-Cut problem on 3-regular graphs. This codebase enables:
+- Computation of minimum spectral gaps for adiabatic quantum computing (AQC) 
+- QAOA performance evaluation across different circuit depths
+- Correlation analysis between spectral gap and QAOA metrics
+- Comprehensive visualization tools
 
 ## Quick Start
 
@@ -9,137 +13,337 @@ Analysis of minimum spectral gap (Δ_min) for the Adiabatic Quantum Computing Ha
 pip3 install -r requirements.txt
 ```
 
-### Run Analysis
+### Basic Workflow
+```bash
+# 1. Compute spectral gaps for graphs
+python3 spectral_gap_analysis.py
+
+# 2. Run QAOA performance sweep
+python3 qaoa_analysis.py
+
+# 3. Visualize correlation between gap and QAOA performance
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10.csv
+```
+
+---
+
+## Complete Workflow
+
+### 1. Spectral Gap Analysis
+
+Compute minimum spectral gap (Δ_min) along the AQC path `H(s) = (1-s)H_mixer + s·H_problem`.
+
+**Run with default configuration:**
 ```bash
 python3 spectral_gap_analysis.py
 ```
 
-Edit `CONFIG` at top of file to customize:
+**Configure by editing the `CONFIG` dictionary at the top of the file:**
 ```python
 CONFIG = {
-    'N_values': [10, 12],           # Which N to process
-    'S_resolution': 100,             # Sampling resolution
-    'graphs_per_N': {                # Graph selection
-        10: None,                    # None=all, int=first N, range/list=specific
-        12: range(8, 85)            # Skip problematic graphs
+    'N_values': [10, 12],           # Graph sizes to process
+    'S_resolution': 100,             # Sampling resolution along s∈[0,1]
+    'graphs_per_N': {                # Graph selection per N
+        10: None,                    # None = all graphs
+        12: range(8, 85)            # Specific range (skips problematic graphs)
     },
-    'k_vals_check': 20,              # Eigenvalues to check (increase for high degeneracy)
-    'output_suffix': ''              # Optional filename suffix
+    'k_vals_check': 20,              # Eigenvalues to track (increase for high degeneracy)
+    'output_suffix': ''              # Optional suffix for output filename
 }
 ```
 
-Output: Auto-generated CSV filename based on configuration
+**Output:** CSV file with auto-generated name, e.g. `outputs/Delta_min_3_regular_N10_12_res100.csv`
 
-### Visualize
+**Columns:**
+- `N`: Number of qubits
+- `Graph_ID`: Graph identifier
+- `Delta_min`: Minimum spectral gap
+- `s_at_min`: Location where minimum occurs
+- `Max_degeneracy`: Ground state degeneracy
+- `Max_cut_value`: Optimal Max-Cut value
+- `Edges`: Graph edge list
+
+---
+
+### 2. QAOA Performance Sweep
+
+Run QAOA across multiple depths (p=1,2,3,...) and measure approximation ratios.
+
+**Configure by editing parameters at the top of `qaoa_analysis.py`:**
+```python
+# Input: Spectral gap CSV from step 1
+INPUT_CSV = 'outputs/Delta_min_3_regular_N10_res200.csv'
+
+# QAOA depth sweep
+P_VALUES_TO_TEST = list(range(1, 11))  # Test p=1 through p=10
+
+# Optimizer settings
+MAX_OPTIMIZER_ITERATIONS = 500
+OPTIMIZER_METHOD = 'COBYLA'
+NUM_SHOTS = 10000
+
+# Output filename
+OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N10_p1to10.csv'
+```
+
+**Run:**
+```bash
+python3 qaoa_analysis.py
+```
+
+**Output:** CSV with columns for each depth:
+- `p1_approx_ratio`, `p2_approx_ratio`, ..., `p10_approx_ratio`
+- `p1_iterations`, `p2_iterations`, ...
+- Plus all columns from input spectral gap CSV
+
+**Performance:**
+- N=10: ~2s per graph (19 graphs total, ~40s)
+- N=12: ~8s per graph (85 graphs total, ~11 min)
+
+---
+
+### 3. Data Filtering (Remove Optimization Artifacts)
+
+Apply monotonicity filter to remove classical optimization failures where `ratio(p) < ratio(p-1)`.
+
+**Process all QAOA sweep files:**
+```bash
+python3 filter_qaoa_monotonic.py
+```
+
+**Process specific file(s):**
+```bash
+python3 filter_qaoa_monotonic.py outputs/QAOA_p_sweep_N10_p1to10.csv
+python3 filter_qaoa_monotonic.py file1.csv file2.csv file3.csv
+```
+
+**Output:** Creates `*_filtered.csv` versions of each input file.
+
+**What it does:** Marks values as NaN when QAOA performance decreases (indicating optimizer got stuck, not quantum algorithm limitation).
+
+---
+
+### 4. Visualization & Analysis
+
+#### 4.1 Approximation Ratio vs Spectral Gap (All Depths)
+
+Plot correlation between Δ_min and approximation ratio for each p value.
+
+```bash
+# Unfiltered data
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10.csv
+
+# Filtered data (recommended)
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10_filtered.csv
+```
+
+**Output:** Multi-panel plot showing scatter plots, trend lines, and correlation coefficients for each depth.
+
+#### 4.2 Minimum Depth (p*) vs Spectral Gap
+
+Analyze how many layers are needed to reach different approximation ratio thresholds.
+
+```bash
+python3 plot_p_star_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10.csv
+```
+
+**Thresholds analyzed:** 0.75, 0.80, 0.85, 0.90, 0.95
+
+**Output:** Plot showing p* (minimum depth required) vs Δ_min for each threshold.
+
+#### 4.3 Spectral Gap vs Ground State Degeneracy
+
+Explore relationship between gap and degeneracy.
+
+```bash
+python3 plot_delta_vs_degeneracy.py
+```
+
+**Configuration:** Edit `csv_file` path inside the script:
+
+```python
+csv_file = "DataOutputs/Delta_min_3_regular_N12_res20.csv"
+```
+
+#### 4.4 Single Graph Visualization
+
+Interactive visualization of QAOA behavior on individual graphs.
+
+```bash
+# Default graph (smallest Δ_min)
+python3 visualize_qaoa_single_graph.py
+
+# Specific graph by ID
+python3 visualize_qaoa_single_graph.py --graph_id 5
+
+# Hardest/easiest graphs
+python3 visualize_qaoa_single_graph.py --hardest
+python3 visualize_qaoa_single_graph.py --easiest
+
+# Simple example
+python3 visualize_qaoa_single_graph.py --example triangle
+```
+
+**Configuration:** Edit parameters at top of file:
+```python
+INPUT_CSV = 'outputs/Delta_min_3_regular_N12_res20.csv'
+P_LAYERS = 1  # QAOA depth
+MAX_OPTIMIZER_ITERATIONS = 200
+```
+
+#### 4.5 Spectral Gap Visualization
+
+Plot the full spectral gap evolution along the AQC path.
+
 ```bash
 python3 plot_example_spectrum.py
 ```
 
-## Theory
+**Configuration:** Edit inside the script to select specific graphs by ID.
 
-### Hamiltonians
+---
 
-**Initial (Mixer):**
-```
-H_initial = -∑ᵢ X̂ᵢ
-```
+## Data Files
 
-**Problem (Max-Cut):**
-```
-H_problem = ∑₍ᵢ,ⱼ₎∈E ẐᵢẐⱼ
-```
+### Graph Input Formats
 
-**AQC Path:**
-```
-H(s) = (1-s)·H_initial + s·H_problem,  s ∈ [0, 1]
-```
+**GENREG enumeration data (graphs_rawdata/):**
+- `10_3_3.asc` - 19 graphs, N=10, 3-regular, girth 3 (text format)
+- `12_3_3.asc` - 85 graphs, N=12, 3-regular, girth 3 (text format)
+- `12_3_3.scd` - 85 graphs, N=12, 3-regular, girth 3 (binary format)
 
-### Spectral Gap
+Both `.asc` and `.scd` formats are supported. The codebase auto-detects format from file extension.
 
-Gap at parameter s:
-```
-Δ(s) = E_k(s) - E_0(s)
-```
-where k = ground state degeneracy at s=1.
+### Output Files
 
-Minimum spectral gap:
-```
-Δ_min = min_{s∈[0,1]} Δ(s)
-```
+**Spectral gap results:**
+- Format: `Delta_min_{regularity}_N{size}_res{resolution}{suffix}.csv`
+- Example: `Delta_min_3_regular_N10_res200.csv`
 
-## Configuration Examples
+**QAOA sweep results:**
+- Format: `QAOA_p_sweep_N{size}_p{min}to{max}{suffix}.csv`
+- Example: `QAOA_p_sweep_N12_p1to10_deg_2_only.csv`
 
-**Process all graphs:**
-```python
-CONFIG = {'N_values': [10, 12], 'S_resolution': 100, 'graphs_per_N': {10: None, 12: None}}
-# Output: Delta_min_3_regular_N10_12_res100.csv
-```
+**Filtered results:**
+- Format: Original filename + `_filtered.csv`
+- Example: `QAOA_p_sweep_N10_p1to10_filtered.csv`
 
-**Skip problematic N=12 graphs:**
-```python
-CONFIG = {'N_values': [12], 'S_resolution': 100, 'graphs_per_N': {12: range(8, 85)}, 'output_suffix': '_skip8'}
-# Output: Delta_min_3_regular_N12_res100_skip8.csv
-```
+---
 
-**Quick test:**
-```python
-CONFIG = {'N_values': [10], 'S_resolution': 20, 'graphs_per_N': {10: 5}, 'output_suffix': '_test'}
-# Output: Delta_min_3_regular_N10_res20_test.csv
-```
+## Detailed Documentation
 
-## Output Format
+For in-depth analysis, methodology, and results:
 
-CSV columns:
-- `N`: Number of qubits
-- `Graph_ID`: Unique identifier
-- `Delta_min`: Minimum spectral gap
-- `s_at_min`: Location where minimum occurs
-- `Max_degeneracy`: Ground state degeneracy at s=1
-- `Max_cut_value`: Maximum cut value
-- `Edges`: Graph edge list (for reproduction)
+- **[QAOA_SPECTRAL_GAP_ANALYSIS.md](QAOA_SPECTRAL_GAP_ANALYSIS.md)** - Complete correlation analysis, results, and interpretation
+- **[SCD_IMPLEMENTATION_SUMMARY.md](SCD_IMPLEMENTATION_SUMMARY.md)** - Binary graph file format implementation
+- **[FILTERING_SUMMARY.md](FILTERING_SUMMARY.md)** - Monotonic filtering methodology and impact
+- **[QAOA_OPTIMIZATION_CHALLENGES.md](QAOA_OPTIMIZATION_CHALLENGES.md)** - Classical optimizer limitations
 
-## Data Source
-
-Uses complete GENREG enumeration:
-- N=10: 19 graphs from `10_3_3.asc`
-- N=12: 85 graphs from `12_3_3.asc`
-
-See [GENREG](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html) for details.
-
-## Performance
-
-| N | Graphs | Time/Graph | Total Time |
-|---|--------|------------|------------|
-| 10 | 19 | ~2s | ~40s |
-| 12 | 85 | ~8s | ~11min |
-
-Resolution 100 (default). Time scales linearly with `S_resolution`.
+---
 
 ## Project Structure
 
 ```
 FinalQML/
-├── spectral_gap_analysis.py      # Main analysis script
-├── spectral_gap_analysis_test.py # Alternative Hamiltonian formulation
-├── plot_example_spectrum.py      # Visualization tool
-├── 10_3_3.asc, 12_3_3.asc        # GENREG data files
-├── requirements.txt               # Dependencies
-├── README.md                      # This file
-└── METHODOLOGY.tex                # LaTeX methodology for papers
+├── spectral_gap_analysis.py          # Main: Compute Δ_min for graphs
+├── qaoa_analysis.py                   # Main: QAOA performance sweep
+├── filter_qaoa_monotonic.py           # Filter optimization artifacts
+│
+├── plot_p_sweep_ratio_vs_gap.py       # Visualize: ratio vs gap across depths
+├── plot_p_star_vs_gap.py              # Visualize: minimum depth analysis
+├── plot_delta_vs_degeneracy.py        # Visualize: gap vs degeneracy
+├── plot_example_spectrum.py           # Visualize: spectral gap evolution
+├── visualize_qaoa_single_graph.py     # Visualize: individual graph behavior
+│
+├── aqc_spectral_utils.py              # Utilities: Graph I/O, Hamiltonians
+├── test_scd_parser.py                 # Test: SCD file format validation
+│
+├── graphs_rawdata/                    # Input: GENREG graph data
+│   ├── 10_3_3.asc
+│   ├── 12_3_3.asc
+│   └── 12_3_3.scd
+│
+├── outputs/                           # Output: All CSV and PNG results
+│
+├── requirements.txt                   # Dependencies
+├── README.md                          # This file
+│
+└── Documentation files:
+    ├── QAOA_SPECTRAL_GAP_ANALYSIS.md
+    ├── SCD_IMPLEMENTATION_SUMMARY.md
+    ├── FILTERING_SUMMARY.md
+    └── QAOA_OPTIMIZATION_CHALLENGES.md
 ```
+
+---
+
+## Key Findings Summary
+
+1. **QAOA performance correlates with spectral gap**, but the relationship depends on ground state degeneracy
+2. **Optimal QAOA depth for gap studies: p=6** (strongest correlation before optimizer degradation)
+3. **0.90 approximation ratio threshold** is optimal for minimum depth (p*) analysis
+4. **Ground state degeneracy is a confounding variable** - control for it in comparative studies
+5. **Filtering optimization artifacts** significantly improves correlation analysis
+
+See [QAOA_SPECTRAL_GAP_ANALYSIS.md](QAOA_SPECTRAL_GAP_ANALYSIS.md) for complete statistical analysis.
+
+---
+
+## Reproducing Published Results
+
+To reproduce the results in the companion paper:
+
+### N=10 Analysis
+```bash
+# 1. Spectral gaps (already computed)
+# Output: outputs/Delta_min_3_regular_N10_res200.csv
+
+# 2. QAOA sweep p=1 to p=10
+python3 qaoa_analysis.py  # Configure: INPUT_CSV for N10, P_VALUES 1-10
+
+# 3. Filter data
+python3 filter_qaoa_monotonic.py outputs/QAOA_p_sweep_N10_p1to10.csv
+
+# 4. Generate plots
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10_filtered.csv
+python3 plot_p_star_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10_filtered.csv
+```
+
+### N=12 Full Dataset
+```bash
+# QAOA sweep on all 85 graphs
+python3 qaoa_analysis.py  # Configure: INPUT_CSV for N12, P_VALUES 1-10
+
+# Filter and plot
+python3 filter_qaoa_monotonic.py outputs/QAOA_p_sweep_N12_p1to10.csv
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N12_p1to10_filtered.csv
+```
+
+### N=12 Degeneracy-Controlled Subsets
+
+The filtering and analysis scripts automatically process degeneracy-specific files:
+- `QAOA_p_sweep_N12_p1to10_deg_2_only.csv`
+- `QAOA_p_sweep_N12_p1to10_deg_4_only.csv`
+
+To create these subsets, filter the spectral gap CSV by `Max_degeneracy` column before running QAOA analysis.
+
+---
+
+## Citation
+
+*[Companion paper reference to be added]*
+
+For academic use, please cite the companion paper and acknowledge this codebase.
+
+---
 
 ## References
 
 - Farhi et al., "Quantum Computation by Adiabatic Evolution" (2000)
 - Farhi et al., "A Quantum Approximate Optimization Algorithm" (2014)
-- Crosson & Harrow, "Simulated quantum annealing..." (2016)
-- GENREG: Meringer, "Fast generation of regular graphs..." (1999)
-
-## License
-
-Academic research use.
+- GENREG database: [reggraphs.html](https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html)
 
 ---
 
 **Last Updated:** October 2025  
-**Status:** Production-ready
+**Status:** Production-ready, reproducible results

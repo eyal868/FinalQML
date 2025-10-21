@@ -22,9 +22,10 @@ import numpy as np
 from scipy.stats import pearsonr
 import sys
 import re
+import os
 
 # Configuration
-DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to20.csv'
+DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only.csv'
 OUTPUT_DIR = 'outputs/'
 
 # Parse command line arguments
@@ -136,8 +137,17 @@ for idx in range(len(P_VALUES), len(axes_flat)):
 
 plt.tight_layout()
 
-# Save figure with dynamic filename
-output_file = f"{OUTPUT_DIR}p_sweep_ratio_vs_gap_N{N_value}_p{min_p}to{max_p}.png"
+# Generate output filename based on input filename
+input_basename = os.path.basename(INPUT_CSV)  # Get filename without path
+input_name_no_ext = os.path.splitext(input_basename)[0]  # Remove extension
+
+# Replace "QAOA_p_sweep" with "p_sweep_ratio_vs_gap", or prepend if not present
+if input_name_no_ext.startswith("QAOA_p_sweep"):
+    output_name = input_name_no_ext.replace("QAOA_p_sweep", "p_sweep_ratio_vs_gap", 1)
+else:
+    output_name = f"p_sweep_ratio_vs_gap_{input_name_no_ext}"
+
+output_file = f"{OUTPUT_DIR}{output_name}.png"
 plt.savefig(output_file, dpi=300, bbox_inches='tight')
 print(f"\n✅ Figure saved: {output_file}")
 
