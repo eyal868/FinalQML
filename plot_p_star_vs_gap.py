@@ -21,7 +21,7 @@ import re
 import os
 
 # Configuration
-DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to10_deg_2_only_filtered.csv'
+DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only_filtered.csv'
 OUTPUT_DIR = 'outputs/'
 THRESHOLDS = [0.75, 0.80, 0.85, 0.90, 0.95]
 
@@ -82,7 +82,7 @@ for threshold in THRESHOLDS:
 fig, ax = plt.subplots(1, 1, figsize=(12, 8))
 
 # Color palette for different thresholds
-colors = ['#e74c3c', '#e67e22', '#f39c12', '#2ecc71', '#3498db']
+colors = ['#e74c3c', '#9b59b6', '#f39c12', '#2ecc71', '#3498db']  # Changed orange to purple for 0.80
 markers = ['o', 's', '^', 'D', 'v']
 
 # Plot p* vs Δ_min for each threshold
@@ -116,10 +116,14 @@ for i, threshold in enumerate(THRESHOLDS):
                   s=100, alpha=0.4, c=colors[i], marker='x',
                   edgecolors='black', linewidth=2)
 
+# Add legend entry for 'Not Reached' markers
+ax.scatter([], [], s=100, alpha=0.4, c='gray', marker='x',
+          edgecolors='black', linewidth=2, label='Not Reached')
+
 # Formatting
 ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=14, fontweight='bold')
 ax.set_ylabel('Minimum p Required (p*)', fontsize=14, fontweight='bold')
-ax.set_title(f'Minimum QAOA Depth vs Spectral Gap (N={N_value})', 
+ax.set_title(f'Minimum QAOA Depth vs Spectral Gap (N={N_value} deg 4 graphs)',
              fontsize=16, fontweight='bold', pad=20)
 ax.grid(True, alpha=0.3)
 ax.legend(loc='best', fontsize=11, framealpha=0.9)
@@ -134,6 +138,25 @@ ax.axhline(y=max_p + 0.5, color='red', linestyle=':', linewidth=1, alpha=0.3)
 ax.text(ax.get_xlim()[1], max_p + 0.5, ' Not Reached', 
         verticalalignment='center', fontsize=9, color='red', alpha=0.7)
 
+# Add statistical summary text box
+corr_text = "Correlation Statistics (Pearson)\n" + "─" * 35 + "\n"
+for threshold in THRESHOLDS:
+    y = np.array(p_star_data[threshold])
+    reached_mask = y <= max_p
+    
+    if np.sum(reached_mask) > 2:
+        x_valid = df['Delta_min'].values[reached_mask]
+        y_valid = y[reached_mask]
+        r_pearson, stat_pval_pearson = pearsonr(x_valid, y_valid)
+        
+        sig = '***' if stat_pval_pearson < 0.001 else '**' if stat_pval_pearson < 0.01 else '*' if stat_pval_pearson < 0.05 else ''
+        corr_text += f"θ={threshold:.2f}: r={r_pearson:+.3f} (p={stat_pval_pearson:.3f}){sig}\n"
+
+# Position text box in upper-right corner
+ax.text(0.98, 0.98, corr_text, transform=ax.transAxes,
+        fontsize=9, verticalalignment='top', horizontalalignment='right',
+        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black'))
+
 plt.tight_layout()
 
 # Generate output filename based on input filename
@@ -144,7 +167,7 @@ input_name_no_ext = os.path.splitext(input_basename)[0]  # Remove extension
 if input_name_no_ext.startswith("QAOA_p_sweep"):
     output_name = input_name_no_ext.replace("QAOA_p_sweep", "p_star_vs_gap", 1)
 else:
-    output_name = f"p_star_vs_gap_{input_name_no_ext}"
+    output_name = f"p_star_vs_gap_{input_name_no_ext}----"
 
 output_file = f"{OUTPUT_DIR}{output_name}.png"
 plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -167,16 +190,16 @@ for threshold in THRESHOLDS:
         y_valid = y[reached_mask]
         
         # Pearson correlation
-        r_pearson, p_pearson = pearsonr(x_valid, y_valid)
+        r_pearson, stat_pval_pearson = pearsonr(x_valid, y_valid)
         
         # Spearman correlation (rank-based, more robust)
-        r_spearman, p_spearman = spearmanr(x_valid, y_valid)
+        r_spearman, stat_pval_spearman = spearmanr(x_valid, y_valid)
         
-        sig_pearson = '***' if p_pearson < 0.001 else '**' if p_pearson < 0.01 else '*' if p_pearson < 0.05 else ''
-        sig_spearman = '***' if p_spearman < 0.001 else '**' if p_spearman < 0.01 else '*' if p_spearman < 0.05 else ''
+        sig_pearson = '***' if stat_pval_pearson < 0.001 else '**' if stat_pval_pearson < 0.01 else '*' if stat_pval_pearson < 0.05 else ''
+        sig_spearman = '***' if stat_pval_spearman < 0.001 else '**' if stat_pval_spearman < 0.01 else '*' if stat_pval_spearman < 0.05 else ''
         
-        print(f"   {threshold:.2f}     | {r_pearson:+.4f}   | {p_pearson:.4f}  | "
-              f"{r_spearman:+.4f}    | {p_spearman:.4f}  | {sig_spearman}")
+        print(f"   {threshold:.2f}     | {r_pearson:+.4f}   | {stat_pval_pearson:.4f}  | "
+              f"{r_spearman:+.4f}    | {stat_pval_spearman:.4f}  | {sig_spearman}")
     else:
         print(f"   {threshold:.2f}     | N/A (too few points)")
 
