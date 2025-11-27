@@ -36,6 +36,9 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 # Input data file (from spectral gap analysis)
 INPUT_CSV = 'outputs/Delta_min_3_regular_N12_res20.csv'
 
+# Degeneracy filtering (None = process all, int = filter to specific degeneracy)
+FILTER_DEGENERACY = 4  # Only process deg=4 graphs (26 graphs from N12 dataset)
+
 # QAOA parameters - p-sweep mode
 P_VALUES_TO_TEST = list(range(1, 11))  # Test p=1,2,3,...,10
 MAX_OPTIMIZER_ITERATIONS = 500  # Maximum classical optimizer iterations
@@ -43,7 +46,15 @@ OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to20.csv'
+OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only_improved.csv'
+
+# Optimization improvement parameters
+USE_HEURISTIC_INIT = True          # Use problem-specific initialization for p=1
+USE_WARMSTART = True               # Use warm-start from p-1 for p>=2
+USE_MULTISTART = True              # Use multi-start for high p values
+MULTISTART_THRESHOLD_P = 7         # Apply multi-start for p >= this value
+MULTISTART_NUM_ATTEMPTS = 3        # Number of random starts to try
+MULTISTART_EARLY_STOP_RATIO = 0.95 # Stop early if this ratio reached
 
 # Simulation backend
 SIMULATOR_METHOD = 'statevector'  # Noiseless simulation
@@ -133,16 +144,130 @@ def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]])
 
 
 # =========================================================================
-# 3. QAOA OPTIMIZATION FUNCTION
+# 3. OPTIMIZATION IMPROVEMENT FUNCTIONS
 # =========================================================================
 
-def run_qaoa(edges: List[Tuple[int, int]], 
-             n_qubits: int,
-             p: int = 1,
-             max_iter: int = 200,
-             initial_params: np.ndarray = None) -> Dict:
+def get_heuristic_initial_params(p: int) -> np.ndarray:
     """
-    Run QAOA on a Max-Cut problem instance.
+    Generate heuristic initial parameters for MaxCut QAOA.
+    Based on typical good ranges from literature:
+    - γ ∈ [0, π/4] (interaction strength)
+    - β ∈ [0, π/2] (mixing angle)
+    
+    Args:
+        p: Number of QAOA layers
+        
+    Returns:
+        Initial parameter array [γ₁, ..., γₚ, β₁, ..., βₚ]
+    """
+    gamma = np.linspace(0.1, np.pi/4, p)
+    beta = np.linspace(0.1, np.pi/2, p)
+    return np.concatenate([gamma, beta])
+
+
+def extend_params_for_warmstart(previous_params: np.ndarray, p: int) -> np.ndarray:
+    """
+    Extend previous optimal parameters for next layer (warm-start).
+    Strategy: Add new layer with slight perturbation of previous layer's last values.
+    
+    Args:
+        previous_params: Optimal parameters from p-1 run
+        p: Target number of layers (should be len(previous_params)//2 + 1)
+        
+    Returns:
+        Extended parameter array for p layers
+    """
+    p_prev = len(previous_params) // 2
+    gamma_prev = previous_params[:p_prev]
+    beta_prev = previous_params[p_prev:]
+    
+    # New layer parameters with slight decay and small random perturbation
+    np.random.seed(RANDOM_SEED + p)  # Deterministic but p-dependent
+    gamma_new = gamma_prev[-1] * 0.9 + 0.05 * np.random.randn()
+    beta_new = beta_prev[-1] * 0.9 + 0.05 * np.random.randn()
+    
+    # Clip to valid ranges
+    gamma_new = np.clip(gamma_new, 0, np.pi)
+    beta_new = np.clip(beta_new, 0, np.pi)
+    
+    return np.concatenate([gamma_prev, [gamma_new], beta_prev, [beta_new]])
+
+
+def run_qaoa_multistart(edges: List[Tuple[int, int]], 
+                        n_qubits: int,
+                        p: int,
+                        max_iter: int,
+                        initial_params: np.ndarray = None,
+                        optimal_cut: float = None,
+                        num_attempts: int = 3,
+                        early_stop_ratio: float = 0.95) -> Dict:
+    """
+    Run QAOA with multiple random initializations, keeping the best result.
+    
+    Args:
+        edges: Graph edges
+        n_qubits: Number of qubits
+        p: Number of QAOA layers
+        max_iter: Max optimizer iterations per attempt
+        initial_params: First attempt uses this (e.g., warm-start), others are random
+        optimal_cut: Known optimal cut value (for early stopping)
+        num_attempts: Number of random starts to try
+        early_stop_ratio: Stop if approximation ratio reaches this threshold
+        
+    Returns:
+        Best result dictionary from all attempts
+    """
+    best_result = None
+    best_expected_cut = -np.inf
+    
+    for attempt in range(num_attempts):
+        # First attempt uses provided initial_params (e.g., warm-start)
+        # Subsequent attempts use random initialization
+        if attempt == 0 and initial_params is not None:
+            attempt_params = initial_params
+        else:
+            np.random.seed(RANDOM_SEED + attempt + p * 100)
+            attempt_params = 2 * np.pi * np.random.rand(2 * p)
+        
+        print(f"      Multi-start attempt {attempt+1}/{num_attempts}...", end=" ")
+        
+        result = run_qaoa_single(
+            edges=edges,
+            n_qubits=n_qubits,
+            p=p,
+            max_iter=max_iter,
+            initial_params=attempt_params
+        )
+        
+        expected_cut = result['expected_cut']
+        print(f"cut={expected_cut:.2f}")
+        
+        if expected_cut > best_expected_cut:
+            best_expected_cut = expected_cut
+            best_result = result
+            best_result['multistart_attempts_used'] = attempt + 1
+        
+        # Early stopping if target ratio reached
+        if optimal_cut is not None:
+            ratio = expected_cut / optimal_cut
+            if ratio >= early_stop_ratio:
+                print(f"      Early stop: ratio {ratio:.4f} >= {early_stop_ratio:.4f}")
+                break
+    
+    return best_result
+
+
+# =========================================================================
+# 4. QAOA OPTIMIZATION FUNCTION
+# =========================================================================
+
+def run_qaoa_single(edges: List[Tuple[int, int]], 
+                    n_qubits: int,
+                    p: int = 1,
+                    max_iter: int = 200,
+                    initial_params: np.ndarray = None) -> Dict:
+    """
+    Run QAOA on a Max-Cut problem instance (single optimization attempt).
     
     Args:
         edges: Graph edges as list of tuples
@@ -286,8 +411,53 @@ def run_qaoa(edges: List[Tuple[int, int]],
     }
 
 
+def run_qaoa(edges: List[Tuple[int, int]], 
+             n_qubits: int,
+             p: int = 1,
+             max_iter: int = 200,
+             initial_params: np.ndarray = None,
+             optimal_cut: float = None) -> Dict:
+    """
+    Run QAOA with automatic multi-start for high p values.
+    
+    Dispatcher that chooses between single-start and multi-start optimization
+    based on configuration and p value.
+    
+    Args:
+        edges: Graph edges as list of tuples
+        n_qubits: Number of qubits (nodes)
+        p: Number of QAOA layers
+        max_iter: Maximum optimizer iterations
+        initial_params: Initial parameter values (for warm-start or heuristic)
+        optimal_cut: Known optimal cut value (for early stopping in multi-start)
+        
+    Returns:
+        Dictionary with QAOA results (same format as run_qaoa_single)
+    """
+    # Use multi-start for high p values if enabled
+    if USE_MULTISTART and p >= MULTISTART_THRESHOLD_P:
+        return run_qaoa_multistart(
+            edges=edges,
+            n_qubits=n_qubits,
+            p=p,
+            max_iter=max_iter,
+            initial_params=initial_params,
+            optimal_cut=optimal_cut,
+            num_attempts=MULTISTART_NUM_ATTEMPTS,
+            early_stop_ratio=MULTISTART_EARLY_STOP_RATIO
+        )
+    else:
+        return run_qaoa_single(
+            edges=edges,
+            n_qubits=n_qubits,
+            p=p,
+            max_iter=max_iter,
+            initial_params=initial_params
+        )
+
+
 # =========================================================================
-# 4. EXAMPLE: 3-NODE TRIANGLE (VALIDATION)
+# 5. EXAMPLE: 3-NODE TRIANGLE (VALIDATION)
 # =========================================================================
 
 def run_3node_example():
@@ -308,13 +478,14 @@ def run_3node_example():
     edges = [(0, 1), (1, 2), (0, 2)]
     n_qubits = 3
     optimal_cut = 2  # Known optimal value
+    test_p = 2  # Test with p=2 layers
     
     print(f"\nGraph: {edges}")
     print(f"Optimal cut value: {optimal_cut}")
-    print(f"Configuration: p={P_LAYERS}, max_iter={MAX_OPTIMIZER_ITERATIONS}, shots={NUM_SHOTS}")
+    print(f"Configuration: p={test_p}, max_iter={MAX_OPTIMIZER_ITERATIONS}, shots={NUM_SHOTS}")
     
     # Run QAOA
-    result = run_qaoa(edges, n_qubits, p=P_LAYERS, max_iter=MAX_OPTIMIZER_ITERATIONS)
+    result = run_qaoa(edges, n_qubits, p=test_p, max_iter=MAX_OPTIMIZER_ITERATIONS, optimal_cut=optimal_cut)
     
     # Calculate approximation ratio
     approx_ratio = result['best_cut_value'] / optimal_cut
@@ -335,7 +506,7 @@ def run_3node_example():
 
 
 # =========================================================================
-# 5. MAIN: ANALYZE GRAPHS FROM SPECTRAL GAP DATA
+# 6. MAIN: ANALYZE GRAPHS FROM SPECTRAL GAP DATA
 # =========================================================================
 
 def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
@@ -356,6 +527,12 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     df = pd.read_csv(csv_path)
     print(f"   Found {len(df)} graphs for N={df['N'].iloc[0]}")
     
+    # Filter by degeneracy if specified
+    if FILTER_DEGENERACY is not None:
+        df = df[df['Max_degeneracy'] == FILTER_DEGENERACY].copy()
+        df = df.reset_index(drop=True)
+        print(f"   Filtered to {len(df)} graphs with degeneracy={FILTER_DEGENERACY}")
+    
     print(f"\n📊 Configuration:")
     print(f"   • QAOA layers to test: p={P_VALUES_TO_TEST}")
     print(f"   • Max optimizer iterations: {MAX_OPTIMIZER_ITERATIONS}")
@@ -363,6 +540,13 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     print(f"   • Number of shots: {NUM_SHOTS}")
     print(f"   • Simulator method: {SIMULATOR_METHOD}")
     print(f"   • Random seed: {RANDOM_SEED}")
+    print(f"\n📈 Optimization Improvements:")
+    print(f"   • Heuristic initialization (p=1): {'Enabled' if USE_HEURISTIC_INIT else 'Disabled'}")
+    print(f"   • Warm-start (p≥2): {'Enabled' if USE_WARMSTART else 'Disabled'}")
+    print(f"   • Multi-start (p≥{MULTISTART_THRESHOLD_P}): {'Enabled' if USE_MULTISTART else 'Disabled'}")
+    if USE_MULTISTART:
+        print(f"     - Attempts: {MULTISTART_NUM_ATTEMPTS}")
+        print(f"     - Early stop ratio: {MULTISTART_EARLY_STOP_RATIO}")
     
     # Prepare results storage
     results_data = []
@@ -394,17 +578,33 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
                 'Optimal_cut': optimal_cut,
             }
             
+            # Track previous optimal params for warm-start
+            previous_optimal_params = None
+            
             # Test each p value
             for p in P_VALUES_TO_TEST:
                 print(f"    Testing p={p}...", end=" ")
                 p_start = time.time()
                 
+                # Determine initial parameters using optimization strategy
+                if USE_WARMSTART and previous_optimal_params is not None:
+                    initial_params = extend_params_for_warmstart(previous_optimal_params, p)
+                elif USE_HEURISTIC_INIT and p == 1:
+                    initial_params = get_heuristic_initial_params(p)
+                else:
+                    initial_params = None  # Random initialization
+                
                 qaoa_result = run_qaoa(
                     edges=edges,
                     n_qubits=n_qubits,
                     p=p,
-                    max_iter=MAX_OPTIMIZER_ITERATIONS
+                    max_iter=MAX_OPTIMIZER_ITERATIONS,
+                    initial_params=initial_params,
+                    optimal_cut=optimal_cut
                 )
+                
+                # Store optimal params for next iteration
+                previous_optimal_params = qaoa_result['optimal_params']
                 
                 p_time = time.time() - p_start
                 
@@ -516,7 +716,7 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
 
 
 # =========================================================================
-# 6. COMMAND-LINE INTERFACE
+# 7. COMMAND-LINE INTERFACE
 # =========================================================================
 
 def main():
