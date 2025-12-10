@@ -25,7 +25,7 @@
 
 **Title**: "QML Final Project - Project 5: Numerical Analyses of The Relation Between QAOA Performance and The Minimum Spectral Gap"
 
-**Authors**: Eyal Chai-Ezra, Ori Glam
+**Author**: Eyal Chai-Ezra
 
 **Abstract**: This work investigates whether the QAOA required circuit depth (p) depends on the minimum spectral gap (g_min) in the same way that Adiabatic Quantum Computing runtime scales as T ∝ 1/g_min². Through numerical analysis of 3-regular Max-Cut graphs (N=10, 12) with controls for ground state degeneracy, we discovered counter-intuitive results: instances with smaller g_min (AQC-hard) often achieved **higher** approximation ratios at fixed depths. Correspondingly, instances with larger g_min (AQC-easy) appeared to require **more** layers to reach target accuracy. We conclude that g_min is **not a reliable predictor** for QAOA performance, which is governed by a more complex interplay between the quantum ansatz and classical parameter optimization.
 
