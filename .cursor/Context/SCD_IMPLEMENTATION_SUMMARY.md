@@ -109,11 +109,11 @@ The `.scd` format uses **differential compression** to efficiently store multipl
 from aqc_spectral_utils import parse_scd_file
 
 # Auto-detect parameters from filename
-graphs = parse_scd_file("graphs_rawdata/12_3_3.scd")
+graphs = parse_scd_file("../../graphs_rawdata/12_3_3.scd")
 print(f"Loaded {len(graphs)} graphs")  # 85
 
 # Or specify parameters explicitly
-graphs = parse_scd_file("graphs_rawdata/12_3_3.scd", n=12, k=3)
+graphs = parse_scd_file("../../graphs_rawdata/12_3_3.scd", n=12, k=3)
 ```
 
 ### Format-Agnostic Loading
