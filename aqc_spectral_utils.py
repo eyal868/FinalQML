@@ -414,10 +414,11 @@ def find_min_gap_sparse(
     if verbose:
         print("done")
     
-    # Check degeneracy at s=1 using sparse eigensolver
-    # Request target_degeneracy + 1 eigenvalues to verify degeneracy
-    k_check = target_degeneracy + 1
-    evals_final = eigsh(H_P_sparse, k=k_check, which='SA', return_eigenvectors=False)
+    # Check degeneracy at s=1 - H_P is diagonal, so eigenvalues are diagonal elements
+    # This is deterministic (no random eigsh initialization)
+    diagonal = H_P_sparse.diagonal()
+    k_check = min(target_degeneracy + 1, len(diagonal))
+    evals_final = np.partition(diagonal, k_check - 1)[:k_check]
     evals_final = np.sort(evals_final)
     
     # Verify degeneracy matches target
@@ -494,9 +495,11 @@ def find_min_gap_sparse_general(
     H_B_sparse = build_H_initial_sparse(N)
     H_P_sparse = build_H_problem_sparse(N, edges)
     
-    # Check degeneracy at s=1
-    k_check = min(max_degeneracy + 1, 2**N)
-    evals_final = eigsh(H_P_sparse, k=k_check, which='SA', return_eigenvectors=False)
+    # Check degeneracy at s=1 - H_P is diagonal, so eigenvalues are diagonal elements
+    # This is deterministic (no random eigsh initialization)
+    diagonal = H_P_sparse.diagonal()
+    k_check = min(max_degeneracy + 1, len(diagonal))
+    evals_final = np.partition(diagonal, k_check - 1)[:k_check]
     evals_final = np.sort(evals_final)
     
     _, degeneracy_s1 = find_first_gap(evals_final, tol=DEGENERACY_TOL)

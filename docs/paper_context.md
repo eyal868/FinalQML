@@ -116,3 +116,5 @@ Does the QAOA circuit depth (p) depend on the minimum spectral gap (g_min) in th
 
 **Last Updated**: November 25, 2025
 
+
+

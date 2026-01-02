@@ -46,7 +46,7 @@ OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only_improved.csv'
+OUTPUT_FILENAME = 'old_outputs/QAOA_p_sweep_N12_p1to10_deg_4_only_improved.csv'
 
 # Optimization improvement parameters
 USE_HEURISTIC_INIT = True          # Use problem-specific initialization for p=1

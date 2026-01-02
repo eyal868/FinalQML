@@ -25,7 +25,7 @@ import re
 import os
 
 # Configuration
-DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only.csv'
+DEFAULT_INPUT = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
 OUTPUT_DIR = 'outputs/'
 
 # Parse command line arguments

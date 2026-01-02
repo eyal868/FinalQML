@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import time
 from typing import Optional
+from multiprocessing import Process, Queue
 
 from aqc_spectral_utils import (
     DEGENERACY_TOL,
@@ -42,12 +43,12 @@ CONFIG = {
     'graphs_per_N': {                     # Graph selection per N
         10: None,
         12: None,
-        14: [4],
-        16: [116]
+        14: [236],#[242,475,410,251,373,82,434,247],
+        16: [3218] #[125, 346, 418, 480, 487, 547, 911, 932, 1082, 1087, 1095, 1113, 1122, 1123, 1169, 1173, 1183, 1241, 1275, 1303, 1342, 1368, 1440, 1504, 1587, 1807, 1831, 1856, 1947, 1966, 1981, 1985, 1993, 2081, 2089, 2202, 2250, 2269, 2274, 2287, 2290, 2293, 2314, 2339, 2436, 2469, 2487, 2489, 2500, 2534, 2566, 2572, 2593, 2607, 2611, 2613, 2694, 2712, 2725, 2828, 2853, 2905, 2955, 3015, 3085, 3087, 3107, 3136, 3162, 3218, 3221, 3332, 3368, 3410, 3472, 3686, 3689, 3702, 3711, 3721, 3722, 3727, 3742, 3743, 3747, 3751, 3756, 3787, 3790, 3813, 3821, 3825, 3845, 3855, 3859, 3904, 3908, 3948, 3985, 4000, 4016, 4019]
     },
     'k_vals_check': 50,                   # Threshold for 'grid' method
     
-    'output_suffix': '-sparse_optimized-new', # Filename suffix
+    'output_suffix': '-sparse_optimized-new-skipped-check-best8', # Filename suffix
     'degree': 3,                          # Graph regularity (3, 4, 5)
     
     # METHOD SELECTION: 'sparse' (recommended) or 'grid' (legacy)
@@ -57,6 +58,9 @@ CONFIG = {
     'target_degeneracy': 2,               # Only process k=2 graphs (unique solution)
     's_bounds': (0.01, 0.99),             # Optimization bounds
     'xtol': 1e-4,                         # Optimization tolerance
+    
+    # TIMEOUT
+    'graph_timeout': 100,                   # Timeout in seconds per graph (None to disable)
 }
 
 # GENREG data files
@@ -93,7 +97,65 @@ def _generate_output_filename():
 OUTPUT_FILENAME = _generate_output_filename()
 
 # =========================================================================
-# 2. MAIN EXECUTION
+# 2. TIMEOUT HELPER
+# =========================================================================
+
+def _worker_wrapper(queue, func, args, kwargs):
+    """Worker function that runs in subprocess and puts result in queue."""
+    try:
+        result = func(*args, **kwargs)
+        queue.put(('success', result))
+    except Exception as e:
+        queue.put(('error', str(e)))
+
+
+def run_with_timeout(func, args=(), kwargs=None, timeout=None):
+    """
+    Run a function with a timeout using multiprocessing.
+    
+    Args:
+        func: Function to run
+        args: Positional arguments for func
+        kwargs: Keyword arguments for func
+        timeout: Timeout in seconds (None = no timeout)
+        
+    Returns:
+        Tuple of (result, timed_out):
+        - result: Function return value (or None if timed out/error)
+        - timed_out: True if function was terminated due to timeout
+    """
+    if timeout is None:
+        # No timeout, run directly
+        return func(*args, **(kwargs or {})), False
+    
+    kwargs = kwargs or {}
+    queue = Queue()
+    
+    p = Process(target=_worker_wrapper, args=(queue, func, args, kwargs))
+    p.start()
+    p.join(timeout)
+    
+    if p.is_alive():
+        # Timeout occurred
+        p.terminate()
+        p.join()
+        return None, True
+    
+    # Get result from queue
+    if not queue.empty():
+        status, result = queue.get()
+        if status == 'success':
+            return result, False
+        else:
+            # Error occurred in subprocess
+            print(f"    Warning: Subprocess error: {result}")
+            return None, False
+    
+    return None, False
+
+
+# =========================================================================
+# 3. MAIN EXECUTION
 # =========================================================================
 
 def main():
@@ -112,6 +174,8 @@ def main():
         print(f"  • Target degeneracy: k={CONFIG.get('target_degeneracy', 2)}")
         print(f"  • s bounds: {CONFIG.get('s_bounds', (0.01, 0.99))}")
         print(f"  • Optimization tolerance: {CONFIG.get('xtol', 1e-4)}")
+        timeout = CONFIG.get('graph_timeout', None)
+        print(f"  • Timeout per graph: {timeout}s" if timeout else "  • Timeout: disabled")
     else:
         print(f"  • S_RESOLUTION: {CONFIG['S_resolution']}")
         print(f"  • k_vals_check: {CONFIG['k_vals_check']}")
@@ -124,6 +188,8 @@ def main():
     data = []
     total_eigsh_calls = 0
     skipped_degeneracy = 0
+    timeout_skipped = []  # Track graphs skipped due to timeout
+    graph_timeout = CONFIG.get('graph_timeout', None)
     
     start_time = time.time()
     print(f"\n🚀 Starting analysis...")
@@ -188,20 +254,28 @@ def main():
             graph_id = file_pos + 1
             
             if use_sparse:
-                # SPARSE METHOD
-                result = find_min_gap_sparse(
-                    N=N,
-                    edges=edges,
-                    num_edges=num_edges,
-                    target_degeneracy=CONFIG.get('target_degeneracy', 2),
-                    s_bounds=CONFIG.get('s_bounds', (0.01, 0.99)),
-                    xtol=CONFIG.get('xtol', 1e-4),
-                    verbose=False
+                # SPARSE METHOD with timeout
+                result, timed_out = run_with_timeout(
+                    find_min_gap_sparse,
+                    args=(N, edges, num_edges),
+                    kwargs={
+                        'target_degeneracy': CONFIG.get('target_degeneracy', 2),
+                        's_bounds': CONFIG.get('s_bounds', (0.01, 0.99)),
+                        'xtol': CONFIG.get('xtol', 1e-4),
+                        'verbose': False
+                    },
+                    timeout=graph_timeout
                 )
+                
+                if timed_out:
+                    timeout_skipped.append(graph_id)
+                    print(f"    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | ⏰ TIMEOUT (>{graph_timeout}s)")
+                    continue
+                
                 delta_min, s_min, max_deg, max_cut, num_evals = result
                 total_eigsh_calls += num_evals
             else:
-                # GRID METHOD
+                # GRID METHOD (no timeout for legacy method)
                 H_P = build_H_problem(N, edges)
                 result = find_min_gap_with_degeneracy(H_B, H_P, s_points, num_edges, 
                                                        CONFIG['k_vals_check'], verbose=True)
@@ -252,8 +326,11 @@ def main():
         # Statistics
         total_time = time.time() - start_time
         print(f"\n✅ ANALYSIS COMPLETE!")
-        print(f"   • Total graphs: {len(data)}")
-        print(f"   • Skipped: {skipped_degeneracy}")
+        print(f"   • Total graphs processed: {len(data)}")
+        print(f"   • Skipped (degeneracy): {skipped_degeneracy}")
+        if timeout_skipped:
+            print(f"   • Skipped (timeout): {len(timeout_skipped)}")
+            print(f"   • Timed out graph IDs: {timeout_skipped}")
         print(f"   • Total time: {total_time:.2f}s ({total_time/60:.2f}m)")
         print(f"   • Avg time/graph: {total_time/len(data):.2f}s")
         
@@ -265,7 +342,12 @@ def main():
         print(f"   • Min Δ_min: {df['Delta_min'].min():.6f}")
         print(f"   • Max Δ_min: {df['Delta_min'].max():.6f}")
     else:
-        print("\n⚠️  No valid graphs found (check degeneracy filters).")
+        print("\n⚠️  No valid graphs found.")
+        if skipped_degeneracy > 0:
+            print(f"   • Skipped (degeneracy): {skipped_degeneracy}")
+        if timeout_skipped:
+            print(f"   • Skipped (timeout): {len(timeout_skipped)}")
+            print(f"   • Timed out graph IDs: {timeout_skipped}")
         
     print("=" * 70)
 

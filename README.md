@@ -70,6 +70,7 @@ CONFIG = {
 Run QAOA across multiple depths (p=1,2,3,...) and measure approximation ratios.
 
 **Configure by editing parameters at the top of `qaoa_analysis.py`:**
+
 ```python
 # Input: Spectral gap CSV from step 1
 INPUT_CSV = 'outputs/Delta_min_3_regular_N10_res200.csv'
@@ -83,7 +84,7 @@ OPTIMIZER_METHOD = 'COBYLA'
 NUM_SHOTS = 10000
 
 # Output filename
-OUTPUT_FILENAME = 'outputs/QAOA_p_sweep_N10_p1to10.csv'
+OUTPUT_FILENAME = 'old_outputs/QAOA_p_sweep_N10_p1to10.csv'
 ```
 
 **Run:**
