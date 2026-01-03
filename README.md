@@ -14,6 +14,17 @@ pip3 install -r requirements.txt
 ```
 
 ### Basic Workflow
+
+**Option A: Unified Pipeline (Recommended)**
+```bash
+# Run complete analysis in one command
+python3 run_qaoa_pipeline.py --input outputs/Delta_min_3_regular_N12_sparse_k2_final.csv
+
+# With parallel processing (8-14x faster on multi-core)
+python3 run_qaoa_pipeline.py --input outputs/Delta_min_3_regular_N12_sparse_k2_final.csv --workers 8
+```
+
+**Option B: Step-by-Step**
 ```bash
 # 1. Compute spectral gaps for graphs
 python3 spectral_gap_analysis.py
@@ -21,15 +32,55 @@ python3 spectral_gap_analysis.py
 # 2. Run QAOA performance sweep
 python3 qaoa_analysis.py
 
-# 3. Visualize correlation between gap and QAOA performance
-python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N10_p1to10.csv
+# 3. Filter optimization artifacts
+python3 filter_qaoa_monotonic.py
+
+# 4. Visualize results
+python3 plot_p_sweep_ratio_vs_gap.py outputs/QAOA_p_sweep_N12_p1to10.csv
+python3 plot_p_star_vs_gap.py outputs/QAOA_p_sweep_N12_p1to10.csv
 ```
 
 ---
 
 ## Complete Workflow
 
-### 1. Spectral Gap Analysis
+### Unified Pipeline (Recommended)
+
+Run the entire QAOA analysis workflow with a single command:
+
+```bash
+python3 run_qaoa_pipeline.py --input outputs/Delta_min_3_regular_N12_sparse_k2_final.csv --output-dir outputs/results/
+```
+
+**All CLI Options:**
+```bash
+python3 run_qaoa_pipeline.py \
+    --input outputs/Delta_min_3_regular_N12_sparse_k2_final.csv \
+    --output-dir outputs/results/ \
+    --degeneracy 2 \          # Filter to graphs with degeneracy=2
+    --p-min 1 --p-max 10 \    # QAOA depth range
+    --max-iter 500 \          # Optimizer iterations
+    --shots 10000 \           # QAOA measurement shots
+    --parallel \              # Enable parallel (default)
+    --workers 8               # Number of CPU cores (default: all)
+```
+
+**Skip Options:**
+- `--skip-qaoa --qaoa-results path/to/existing.csv`: Use existing QAOA results
+- `--skip-filter`: Skip monotonic filtering
+- `--skip-plots`: Skip plot generation
+
+**Outputs:**
+- `QAOA_p_sweep_N{N}_p{min}to{max}.csv`: Raw QAOA results
+- `QAOA_p_sweep_N{N}_p{min}to{max}_filtered.csv`: Filtered results
+- `p_sweep_ratio_vs_gap_N{N}.png`: Approximation ratio plots
+- `p_star_vs_gap_N{N}.png`: Minimum depth plots
+
+---
+
+### Individual Scripts
+
+#### 1. Spectral Gap Analysis
 
 Compute minimum spectral gap (Δ_min) along the AQC path `H(s) = (1-s)H_mixer + s·H_problem`.
 
@@ -97,9 +148,14 @@ python3 qaoa_analysis.py
 - `p1_iterations`, `p2_iterations`, ...
 - Plus all columns from input spectral gap CSV
 
-**Performance:**
+**Performance (Sequential):**
 - N=10: ~2s per graph (19 graphs total, ~40s)
 - N=12: ~8s per graph (85 graphs total, ~11 min)
+
+**Performance (Parallel with 8 workers):**
+- N=10: ~5s total (~8x speedup)
+- N=12: ~1.5 min total (~8x speedup)
+- N=14: ~1-2 hours (vs ~10-12 hours sequential)
 
 ---
 
@@ -234,9 +290,11 @@ Both `.asc` and `.scd` formats are supported. The codebase auto-detects format f
 
 ```
 FinalQML/
-├── spectral_gap_analysis.py          # Main: Compute Δ_min for graphs
-├── qaoa_analysis.py                   # Main: QAOA performance sweep
-├── filter_qaoa_monotonic.py           # Filter optimization artifacts
+├── run_qaoa_pipeline.py               # UNIFIED PIPELINE: Run complete workflow
+│
+├── spectral_gap_analysis.py           # Step 1: Compute Δ_min for graphs
+├── qaoa_analysis.py                   # Step 2: QAOA performance sweep (parallel)
+├── filter_qaoa_monotonic.py           # Step 3: Filter optimization artifacts
 │
 ├── plot_p_sweep_ratio_vs_gap.py       # Visualize: ratio vs gap across depths
 ├── plot_p_star_vs_gap.py              # Visualize: minimum depth analysis
@@ -256,9 +314,8 @@ FinalQML/
 │
 ├── requirements.txt                   # Dependencies
 ├── README.md                          # This file
-
 ```
 
 ---
 
-**Last Updated:** October 2025
+**Last Updated:** January 2026

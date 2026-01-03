@@ -34,7 +34,7 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 # =========================================================================
 
 # Input data file (from spectral gap analysis)
-INPUT_CSV = 'outputs/Delta_min_3_regular_N12_res20.csv'
+INPUT_CSV = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
 
 # Degeneracy filtering (None = process all, int = filter to specific degeneracy)
 FILTER_DEGENERACY = 4  # Only process deg=4 graphs (26 graphs from N12 dataset)
@@ -46,7 +46,7 @@ OPTIMIZER_METHOD = 'COBYLA'     # Classical optimizer (COBYLA from tutorial)
 NUM_SHOTS = 10000               # Number of measurement shots
 
 # Output filename
-OUTPUT_FILENAME = 'old_outputs/QAOA_p_sweep_N12_p1to10_deg_4_only_improved.csv'
+OUTPUT_FILENAME = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
 
 # Optimization improvement parameters
 USE_HEURISTIC_INIT = True          # Use problem-specific initialization for p=1
@@ -54,13 +54,18 @@ USE_WARMSTART = True               # Use warm-start from p-1 for p>=2
 USE_MULTISTART = True              # Use multi-start for high p values
 MULTISTART_THRESHOLD_P = 7         # Apply multi-start for p >= this value
 MULTISTART_NUM_ATTEMPTS = 3        # Number of random starts to try
-MULTISTART_EARLY_STOP_RATIO = 0.95 # Stop early if this ratio reached
+MULTISTART_EARLY_STOP_RATIO = 1 # Stop early if this ratio reached
 
 # Simulation backend
 SIMULATOR_METHOD = 'statevector'  # Noiseless simulation
 
 # Random seed for reproducibility
 RANDOM_SEED = 42
+
+# Parallel processing configuration
+USE_PARALLEL = True              # Enable parallel processing
+NUM_WORKERS = None               # Number of workers (None = all CPU cores)
+VERBOSE_PARALLEL = False         # Print detailed output in parallel mode
 
 # =========================================================================
 # 2. HELPER FUNCTIONS: BUILD COST HAMILTONIAN
@@ -457,7 +462,370 @@ def run_qaoa(edges: List[Tuple[int, int]],
 
 
 # =========================================================================
-# 5. EXAMPLE: 3-NODE TRIANGLE (VALIDATION)
+# 5. PARALLEL PROCESSING SUPPORT
+# =========================================================================
+
+def process_single_graph(args):
+    """
+    Process a single graph - worker function for multiprocessing.
+    
+    This function is designed to be called by multiprocessing.Pool.map().
+    Each worker gets its own copy of the simulator and configuration.
+    
+    Args:
+        args: Tuple of (graph_data, config) where:
+            - graph_data: dict with graph_id, n_qubits, delta_min, s_at_min, 
+                         max_degeneracy, optimal_cut, edges
+            - config: dict with p_values, max_iter, num_shots, simulator_method,
+                     random_seed, use_heuristic_init, use_warmstart, use_multistart,
+                     multistart_threshold_p, multistart_num_attempts, 
+                     multistart_early_stop_ratio, verbose
+    
+    Returns:
+        Dictionary with results for all p values
+    """
+    graph_data, config = args
+    
+    # Unpack graph data
+    graph_id = graph_data['graph_id']
+    n_qubits = graph_data['n_qubits']
+    delta_min = graph_data['delta_min']
+    s_at_min = graph_data['s_at_min']
+    max_degeneracy = graph_data['max_degeneracy']
+    optimal_cut = graph_data['optimal_cut']
+    edges = graph_data['edges']
+    idx = graph_data['idx']
+    total = graph_data['total']
+    
+    # Unpack config
+    p_values = config['p_values']
+    max_iter = config['max_iter']
+    verbose = config.get('verbose', False)
+    
+    # Set module-level configuration for this worker
+    global NUM_SHOTS, SIMULATOR_METHOD, RANDOM_SEED
+    global USE_HEURISTIC_INIT, USE_WARMSTART, USE_MULTISTART
+    global MULTISTART_THRESHOLD_P, MULTISTART_NUM_ATTEMPTS, MULTISTART_EARLY_STOP_RATIO
+    global MAX_OPTIMIZER_ITERATIONS
+    
+    NUM_SHOTS = config['num_shots']
+    SIMULATOR_METHOD = config['simulator_method']
+    RANDOM_SEED = config['random_seed'] + graph_id  # Unique seed per graph
+    USE_HEURISTIC_INIT = config['use_heuristic_init']
+    USE_WARMSTART = config['use_warmstart']
+    USE_MULTISTART = config['use_multistart']
+    MULTISTART_THRESHOLD_P = config['multistart_threshold_p']
+    MULTISTART_NUM_ATTEMPTS = config['multistart_num_attempts']
+    MULTISTART_EARLY_STOP_RATIO = config['multistart_early_stop_ratio']
+    MAX_OPTIMIZER_ITERATIONS = max_iter
+    
+    # Start timing
+    graph_start = time.time()
+    
+    if verbose:
+        print(f"[{idx+1}/{total}] Graph #{graph_id} | N={n_qubits} | Δ_min={delta_min:.6f}")
+    
+    # Initialize results
+    p_results = {
+        'N': n_qubits,
+        'Graph_ID': graph_id,
+        'Delta_min': delta_min,
+        's_at_min': s_at_min,
+        'Max_degeneracy': max_degeneracy,
+        'Optimal_cut': optimal_cut,
+    }
+    
+    try:
+        # Track previous optimal params for warm-start
+        previous_optimal_params = None
+        
+        # Test each p value
+        for p in p_values:
+            p_start = time.time()
+            
+            # Determine initial parameters
+            if USE_WARMSTART and previous_optimal_params is not None:
+                initial_params = extend_params_for_warmstart(previous_optimal_params, p)
+            elif USE_HEURISTIC_INIT and p == 1:
+                initial_params = get_heuristic_initial_params(p)
+            else:
+                initial_params = None
+            
+            # Run QAOA (use run_qaoa_single directly to avoid verbose output)
+            if USE_MULTISTART and p >= MULTISTART_THRESHOLD_P:
+                qaoa_result = run_qaoa_multistart_quiet(
+                    edges=edges,
+                    n_qubits=n_qubits,
+                    p=p,
+                    max_iter=max_iter,
+                    initial_params=initial_params,
+                    optimal_cut=optimal_cut,
+                    num_attempts=MULTISTART_NUM_ATTEMPTS,
+                    early_stop_ratio=MULTISTART_EARLY_STOP_RATIO
+                )
+            else:
+                qaoa_result = run_qaoa_single_quiet(
+                    edges=edges,
+                    n_qubits=n_qubits,
+                    p=p,
+                    max_iter=max_iter,
+                    initial_params=initial_params
+                )
+            
+            # Store optimal params for next iteration
+            previous_optimal_params = qaoa_result['optimal_params']
+            
+            p_time = time.time() - p_start
+            
+            # Calculate approximation ratio
+            expected_cut = qaoa_result['expected_cut']
+            approx_ratio = expected_cut / optimal_cut
+            
+            # Store results
+            p_results[f'p{p}_expected_cut'] = expected_cut
+            p_results[f'p{p}_approx_ratio'] = approx_ratio
+            p_results[f'p{p}_most_prob_cut'] = qaoa_result['most_probable_cut']
+            p_results[f'p{p}_most_prob_prob'] = qaoa_result['most_probable_prob']
+            p_results[f'p{p}_iterations'] = qaoa_result['num_iterations']
+            p_results[f'p{p}_time'] = p_time
+        
+        graph_time = time.time() - graph_start
+        best_p = max(p_values, key=lambda p: p_results[f'p{p}_approx_ratio'])
+        best_ratio = p_results[f'p{best_p}_approx_ratio']
+        
+        print(f"✓ Graph #{graph_id:3d} done: best p={best_p}, ratio={best_ratio:.4f}, time={graph_time:.1f}s")
+        
+    except Exception as e:
+        print(f"✗ Graph #{graph_id} failed: {e}")
+        for p in p_values:
+            p_results[f'p{p}_expected_cut'] = -1
+            p_results[f'p{p}_approx_ratio'] = -1
+            p_results[f'p{p}_most_prob_cut'] = -1
+            p_results[f'p{p}_most_prob_prob'] = -1
+            p_results[f'p{p}_iterations'] = -1
+            p_results[f'p{p}_time'] = -1
+    
+    return p_results
+
+
+def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=None):
+    """
+    Run QAOA without verbose output - for parallel processing.
+    Same as run_qaoa_single but without print statements.
+    """
+    # Build cost Hamiltonian
+    cost_hamiltonian = edges_to_cost_hamiltonian(edges, n_qubits)
+    
+    # Create QAOA ansatz circuit
+    qaoa_circuit = QAOAAnsatz(cost_hamiltonian, reps=p)
+    
+    # Setup simulator
+    backend = AerSimulator(method=SIMULATOR_METHOD)
+    
+    # Transpile circuit for backend
+    pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
+    transpiled_circuit = pm.run(qaoa_circuit)
+    
+    # Counter for iterations
+    iteration_count = [0]
+    
+    # Cost function to minimize (quiet version)
+    def cost_function(params):
+        iteration_count[0] += 1
+        bound_circuit = transpiled_circuit.assign_parameters(params)
+        from qiskit import QuantumCircuit
+        measured_circuit = bound_circuit.copy()
+        measured_circuit.measure_all()
+        
+        job = backend.run(measured_circuit, shots=NUM_SHOTS, seed_simulator=RANDOM_SEED)
+        result = job.result()
+        counts = result.get_counts()
+        
+        expectation = 0.0
+        total_shots = sum(counts.values())
+        
+        for bitstring, count in counts.items():
+            bitstring_reversed = bitstring[::-1]
+            energy = 0.0
+            for u, v in edges:
+                if bitstring_reversed[u] == bitstring_reversed[v]:
+                    energy += 1.0
+                else:
+                    energy -= 1.0
+            expectation += (count / total_shots) * energy
+        
+        return expectation
+    
+    # Initial parameters
+    if initial_params is None:
+        np.random.seed(RANDOM_SEED)
+        initial_params = 2 * np.pi * np.random.rand(2 * p)
+    
+    # Run optimization
+    start_time = time.time()
+    result = minimize(
+        cost_function,
+        initial_params,
+        method=OPTIMIZER_METHOD,
+        options={'maxiter': max_iter}
+    )
+    optimization_time = time.time() - start_time
+    
+    # Get final solution
+    optimal_params = result.x
+    
+    # Sample from final circuit
+    from qiskit import QuantumCircuit
+    bound_circuit_final = transpiled_circuit.assign_parameters(optimal_params)
+    measured_circuit_final = bound_circuit_final.copy()
+    measured_circuit_final.measure_all()
+    
+    job_final = backend.run(measured_circuit_final, shots=NUM_SHOTS, seed_simulator=RANDOM_SEED)
+    result_final = job_final.result()
+    counts_final = result_final.get_counts()
+    
+    counts_reversed = {}
+    for bitstring, count in counts_final.items():
+        counts_reversed[bitstring[::-1]] = count
+    
+    most_probable_bitstring = max(counts_reversed, key=counts_reversed.get)
+    most_probable_count = counts_reversed[most_probable_bitstring]
+    most_probable_prob = most_probable_count / NUM_SHOTS
+    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges)
+    expected_cut = calculate_expected_cut(counts_reversed, edges)
+    
+    return {
+        'best_bitstring': most_probable_bitstring,
+        'best_cut_value': most_probable_cut,
+        'most_probable_bitstring': most_probable_bitstring,
+        'most_probable_prob': most_probable_prob,
+        'most_probable_cut': most_probable_cut,
+        'expected_cut': expected_cut,
+        'num_iterations': iteration_count[0],
+        'final_cost': result.fun,
+        'optimization_time': optimization_time,
+        'optimal_params': optimal_params,
+    }
+
+
+def run_qaoa_multistart_quiet(edges, n_qubits, p, max_iter, initial_params=None,
+                               optimal_cut=None, num_attempts=3, early_stop_ratio=0.95):
+    """
+    Run QAOA multistart without verbose output - for parallel processing.
+    """
+    best_result = None
+    best_expected_cut = -np.inf
+    
+    for attempt in range(num_attempts):
+        if attempt == 0 and initial_params is not None:
+            attempt_params = initial_params
+        else:
+            np.random.seed(RANDOM_SEED + attempt + p * 100)
+            attempt_params = 2 * np.pi * np.random.rand(2 * p)
+        
+        result = run_qaoa_single_quiet(
+            edges=edges,
+            n_qubits=n_qubits,
+            p=p,
+            max_iter=max_iter,
+            initial_params=attempt_params
+        )
+        
+        expected_cut = result['expected_cut']
+        
+        if expected_cut > best_expected_cut:
+            best_expected_cut = expected_cut
+            best_result = result
+            best_result['multistart_attempts_used'] = attempt + 1
+        
+        if optimal_cut is not None:
+            ratio = expected_cut / optimal_cut
+            if ratio >= early_stop_ratio:
+                break
+    
+    return best_result
+
+
+def analyze_graphs_parallel(df, p_values, output_filename, num_workers=None, config=None):
+    """
+    Parallel version of graph analysis using multiprocessing.Pool.
+    
+    Args:
+        df: DataFrame with graph data
+        p_values: List of p values to test
+        output_filename: Path to save results
+        num_workers: Number of worker processes (None = all CPUs)
+        config: Configuration dictionary
+    
+    Returns:
+        DataFrame with results
+    """
+    from multiprocessing import Pool, cpu_count
+    
+    num_workers = num_workers or cpu_count()
+    
+    print(f"\n🚀 Starting PARALLEL QAOA analysis")
+    print(f"   • Workers: {num_workers}")
+    print(f"   • Graphs: {len(df)}")
+    print(f"   • P values: {p_values}")
+    print("-" * 70)
+    
+    # Prepare work items
+    work_items = []
+    for idx, row in df.iterrows():
+        graph_data = {
+            'graph_id': row['Graph_ID'],
+            'n_qubits': row['N'],
+            'delta_min': row['Delta_min'],
+            's_at_min': row['s_at_min'],
+            'max_degeneracy': row['Max_degeneracy'],
+            'optimal_cut': row['Max_cut_value'],
+            'edges': ast.literal_eval(row['Edges']) if isinstance(row['Edges'], str) else row['Edges'],
+            'idx': idx,
+            'total': len(df),
+        }
+        work_items.append((graph_data, config))
+    
+    # Run parallel processing
+    total_start_time = time.time()
+    
+    with Pool(num_workers) as pool:
+        results_data = pool.map(process_single_graph, work_items)
+    
+    total_time = time.time() - total_start_time
+    
+    # Save results
+    print("\n" + "-" * 70)
+    print(f"\n💾 Saving results to {output_filename}...")
+    results_df = pd.DataFrame(results_data)
+    results_df.to_csv(output_filename, index=False)
+    
+    # Print statistics
+    print(f"\n✅ PARALLEL ANALYSIS COMPLETE!")
+    print(f"   • Total graphs processed: {len(results_df)}")
+    print(f"   • Total time: {total_time:.2f}s ({total_time/60:.2f} minutes)")
+    print(f"   • Average time per graph: {total_time/len(results_df):.2f}s")
+    print(f"   • Speedup factor: ~{num_workers}x (using {num_workers} workers)")
+    
+    # Performance stats
+    print(f"\n📈 QAOA Performance Statistics by p:")
+    for p in p_values:
+        ratio_col = f'p{p}_approx_ratio'
+        if ratio_col in results_df.columns:
+            valid = results_df[results_df[ratio_col] >= 0]
+            if len(valid) > 0:
+                mean_ratio = valid[ratio_col].mean()
+                std_ratio = valid[ratio_col].std()
+                print(f"   p={p:2d}: mean={mean_ratio:.4f}±{std_ratio:.4f}")
+    
+    print(f"\n📁 Data saved to: {output_filename}")
+    print("=" * 70)
+    
+    return results_df
+
+
+# =========================================================================
+# 6. EXAMPLE: 3-NODE TRIANGLE (VALIDATION)
 # =========================================================================
 
 def run_3node_example():
@@ -509,15 +877,25 @@ def run_3node_example():
 # 6. MAIN: ANALYZE GRAPHS FROM SPECTRAL GAP DATA
 # =========================================================================
 
-def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
+def analyze_graphs_from_csv(csv_path: str = INPUT_CSV, use_parallel: bool = None, 
+                            num_workers: int = None):
     """
     Load graphs from spectral gap analysis CSV and run QAOA p-sweep on each.
     
     Tests multiple p values (1 through 10) for each graph and saves all results.
+    Supports both sequential and parallel processing modes.
     
     Args:
         csv_path: Path to CSV file with spectral gap data
+        use_parallel: Override USE_PARALLEL config (None = use config)
+        num_workers: Override NUM_WORKERS config (None = use config or all CPUs)
     """
+    from multiprocessing import cpu_count
+    
+    # Determine parallel mode
+    parallel_mode = use_parallel if use_parallel is not None else USE_PARALLEL
+    workers = num_workers if num_workers is not None else (NUM_WORKERS or cpu_count())
+    
     print("=" * 70)
     print("  QAOA P-SWEEP ANALYSIS ON SPECTRAL GAP GRAPHS")
     print("=" * 70)
@@ -547,6 +925,27 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV):
     if USE_MULTISTART:
         print(f"     - Attempts: {MULTISTART_NUM_ATTEMPTS}")
         print(f"     - Early stop ratio: {MULTISTART_EARLY_STOP_RATIO}")
+    
+    print(f"\n⚡ Parallel Processing: {'Enabled (' + str(workers) + ' workers)' if parallel_mode else 'Disabled'}")
+    
+    # Use parallel processing if enabled
+    if parallel_mode:
+        config = {
+            'p_values': P_VALUES_TO_TEST,
+            'max_iter': MAX_OPTIMIZER_ITERATIONS,
+            'num_shots': NUM_SHOTS,
+            'simulator_method': SIMULATOR_METHOD,
+            'random_seed': RANDOM_SEED,
+            'use_heuristic_init': USE_HEURISTIC_INIT,
+            'use_warmstart': USE_WARMSTART,
+            'use_multistart': USE_MULTISTART,
+            'multistart_threshold_p': MULTISTART_THRESHOLD_P,
+            'multistart_num_attempts': MULTISTART_NUM_ATTEMPTS,
+            'multistart_early_stop_ratio': MULTISTART_EARLY_STOP_RATIO,
+            'verbose': VERBOSE_PARALLEL,
+        }
+        return analyze_graphs_parallel(df, P_VALUES_TO_TEST, OUTPUT_FILENAME, 
+                                       num_workers=workers, config=config)
     
     # Prepare results storage
     results_data = []
