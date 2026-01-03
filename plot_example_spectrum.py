@@ -13,8 +13,8 @@ import ast
 
 # Import shared AQC utilities
 from aqc_spectral_utils import (
-    build_H_initial,
-    build_H_problem,
+    build_H_initial_sparse,
+    build_H_problem_sparse,
     analyze_spectrum_for_visualization,
     DEGENERACY_TOL
 )
@@ -77,10 +77,10 @@ print(f"Max cut value: {graph_data['Max_cut_value']}")
 print(f"Max degeneracy: {graph_data['Max_degeneracy']}")
 print(f"Expected Δ_min from CSV: {graph_data['Delta_min']:.6f} at s = {graph_data['s_at_min']:.3f}")
 
-# Build Hamiltonians
-print(f"\n🔨 Building Hamiltonians for N={N} system...")
-H_B = build_H_initial(N)
-H_P = build_H_problem(N, edges)
+# Build sparse Hamiltonians
+print(f"\n🔨 Building sparse Hamiltonians for N={N} system...")
+H_B = build_H_initial_sparse(N)
+H_P = build_H_problem_sparse(N, edges)
 print("  ✓ Done")
 
 # Compute full spectrum evolution with proper degeneracy handling

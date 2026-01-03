@@ -174,14 +174,17 @@ Map of LaTeX figure references to actual files in repository:
 
 - **Purpose**: Compute minimum spectral gap (g_min) along AQC evolution path
 - **Input**: Graph data from `graphs_rawdata/` (ASC or SCD format)
+- **Method**: Sparse eigensolvers (Lanczos) with Brent's scalar optimization
 - **Configuration**: 
-  - `N_values`: Graph sizes to process [10, 12]
-  - `S_resolution`: Sampling points along s∈[0,1] (20-200)
+  - `N_values`: Graph sizes to process [10, 12, 14, 16, ...]
   - `graphs_per_N`: Subset selection (None=all, int=first N, range=specific)
-  - `k_vals_check`: Max degeneracy threshold (skip if exceeded)
+  - `target_degeneracy`: Filter graphs by degeneracy (default: 2)
+  - `s_bounds`: Optimization bounds (default: (0.01, 0.99))
+  - `xtol`: Optimization tolerance (default: 1e-4)
   - `degree`: Graph regularity (3, 4, or 5)
 - **Output**: CSV with columns: N, Graph_ID, Delta_min, s_at_min, Max_degeneracy, Max_cut_value, Edges
 - **Key Features**:
+  - Sparse Hamiltonians (O(N × 2^N) memory vs O(4^N) for dense)
   - Proper degeneracy handling (tracks E_k - E_0, not E_1 - E_0)
   - Supports 3-regular, 4-regular, 5-regular graphs
   - Auto-generates output filename from configuration
@@ -237,8 +240,10 @@ Map of LaTeX figure references to actual files in repository:
 **Script**: `aqc_spectral_utils.py`
 
 Core functions for quantum analysis:
-- **Hamiltonian Construction**: `build_H_initial()`, `build_H_problem()`, `get_aqc_hamiltonian()`
-- **Gap Finding**: `find_first_gap()`, `find_min_gap_with_degeneracy()`
+- **Sparse Hamiltonian Construction**: `build_H_initial_sparse()`, `build_H_problem_sparse()`, `get_aqc_hamiltonian_sparse()`
+- **Sparse Eigenvalue Computation**: `get_gap_sparse()`, `get_lowest_eigenvalues_sparse()`
+- **Gap Finding**: `find_first_gap()`, `find_min_gap_sparse()`, `find_min_gap_sparse_general()`
+- **Visualization**: `compute_spectrum_evolution()`, `analyze_spectrum_for_visualization()`
 - **Graph I/O**: 
   - `parse_asc_file()` - Text format GENREG graphs
   - `parse_scd_file()` - Binary format GENREG graphs (with differential compression)
@@ -344,13 +349,11 @@ Core functions for quantum analysis:
   - [ ] Geometric graphs
 
 #### 2. High-Precision Gap Calculation
-- [ ] Implement adaptive search for g_min location
-  - Binary search around local minima
-  - Higher resolution near s_min
-- [ ] Efficient methods for larger N
-  - Sparse matrix techniques
-  - Krylov subspace methods for partial diagonalization
-- [ ] Validation: Compare M=20 vs M=200 for N=12
+- [x] **Sparse eigensolvers with Brent's optimization** ✅ Implemented
+  - Uses Lanczos algorithm (eigsh) for k lowest eigenvalues
+  - Brent's method for adaptive minimum search
+  - Memory efficient: O(N × 2^N) vs O(4^N) for dense
+- [ ] Validation: Compare sparse optimization vs grid method for N=12
 
 #### 3. Classical Optimization Enhancement
 - [x] **Warm-Start Initialization** ✅ Implemented November 2025
@@ -382,12 +385,13 @@ Core functions for quantum analysis:
 ### Technical Expansion Directions
 
 #### Larger System Sizes
-- [ ] N=14 graphs (if available in GENREG)
-- [ ] N=16 graphs (computational feasibility check)
-- [ ] N=18+ (requires sparse methods, GPU acceleration)
-- **Challenges**: 
-  - Memory: 2^N × 2^N Hamiltonian matrices
-  - Time: Diagonalization O(2^3N), QAOA simulation O(2^N)
+- [x] N=14 graphs ✅ Supported (sparse method ~1s/graph)
+- [x] N=16 graphs ✅ Supported (sparse method ~5s/graph)
+- [ ] N=18+ graphs (feasible with sparse method)
+- **Performance**: 
+  - Sparse Hamiltonians: O(N × 2^N) memory
+  - Lanczos eigensolvers: O(k × nnz × iterations) time
+  - QAOA simulation: O(2^N) per circuit evaluation
 
 #### Additional Graph Types
 - [x] 3-regular (complete)
@@ -577,10 +581,12 @@ Core functions for quantum analysis:
 ### When Adding New Graph Sizes
 
 1. Update `GENREG_FILES` dict in `spectral_gap_analysis.py`
-2. Consider computational limits:
-   - N=14: ~16K basis, ~30min per graph
-   - N=16: ~65K basis, several hours per graph
-3. May need to reduce S_resolution for larger N
+2. Consider computational limits (sparse method performance):
+   - N=12: ~0.2s per graph
+   - N=14: ~1s per graph
+   - N=16: ~5s per graph
+   - N=18+: feasible with sparse method
+3. Adjust `graph_timeout` if needed for larger N
 4. Update this document with new dataset statistics
 
 ### When Implementing New Optimizers
