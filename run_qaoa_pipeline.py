@@ -93,11 +93,12 @@ Examples:
     parser.add_argument('--qaoa-results', type=str, default=None,
                         help='Existing QAOA results file (required with --skip-qaoa)')
     
-    # Parallel Processing
-    parser.add_argument('--parallel', action='store_true', default=DEFAULT_PARALLEL,
-                        help=f'Enable parallel processing (default: {DEFAULT_PARALLEL})')
-    parser.add_argument('--no-parallel', action='store_true',
+    # Parallel Processing (use dest='parallel' so both flags control the same attribute)
+    parser.add_argument('--parallel', dest='parallel', action='store_true',
+                        help='Enable parallel processing')
+    parser.add_argument('--no-parallel', dest='parallel', action='store_false',
                         help='Disable parallel processing (run sequentially)')
+    parser.set_defaults(parallel=DEFAULT_PARALLEL)
     parser.add_argument('--workers', '-w', type=int, default=DEFAULT_WORKERS,
                         help='Number of worker processes (default: all CPU cores)')
     
@@ -440,8 +441,8 @@ def main():
     
     args = parse_args()
     
-    # Determine parallel mode (--no-parallel overrides --parallel)
-    use_parallel = args.parallel and not args.no_parallel
+    # Parallel mode: --parallel enables, --no-parallel disables, default from DEFAULT_PARALLEL
+    use_parallel = args.parallel
     num_workers = args.workers if args.workers else cpu_count()
     
     print("=" * 70)
