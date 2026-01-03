@@ -30,7 +30,7 @@ from pathlib import Path
 
 # Input/Output
 DEFAULT_INPUT = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
-DEFAULT_OUTPUT_DIR = 'outputs/pipeline_results/'
+DEFAULT_OUTPUT_DIR = 'outputs/pipeline_full_N14/'
 
 # QAOA Parameters
 DEFAULT_DEGENERACY = None  # None = process all, int = filter to specific degeneracy
