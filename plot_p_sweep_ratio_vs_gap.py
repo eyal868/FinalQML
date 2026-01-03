@@ -25,7 +25,7 @@ import re
 import os
 
 # Configuration
-DEFAULT_INPUT = 'outputs/QAOA_p_sweep_N12_p1to10_deg_4_only.csv'
+DEFAULT_INPUT = 'DataOutputs/QAOA_p_sweep_N12_p1to10.csv'
 OUTPUT_DIR = 'outputs/'
 
 # Parse command line arguments
@@ -48,6 +48,17 @@ N_value = df['N'].iloc[0]
 
 # Auto-detect available p values from column names
 ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
+
+if not ratio_cols:
+    print(f"\n❌ ERROR: No QAOA approximation ratio columns found in {INPUT_CSV}")
+    print(f"   Expected columns like 'p1_approx_ratio', 'p2_approx_ratio', etc.")
+    print(f"   Available columns: {', '.join(df.columns.tolist())}")
+    print(f"\n   This script requires QAOA p-sweep output files.")
+    print(f"   Try one of these files instead:")
+    print(f"     - DataOutputs/QAOA_p_sweep_N12_p1to10.csv")
+    print(f"     - DataOutputs/QAOA_p_sweep_N12_p1to10_deg_2_only.csv")
+    sys.exit(1)
+
 P_VALUES = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1)) 
                    for col in ratio_cols])
 max_p = max(P_VALUES)
