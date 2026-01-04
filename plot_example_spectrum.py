@@ -16,16 +16,17 @@ from aqc_spectral_utils import (
     build_H_initial_sparse,
     build_H_problem_sparse,
     analyze_spectrum_for_visualization,
+    analyze_spectrum_for_visualization_sparse,
     DEGENERACY_TOL
 )
 
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different graphs
 # ============================================================================
-CSV_FILENAME = "DataOutputs/Delta_min_3_regular_N12_res20.csv"
-GRAPH_ID = 44  # Which graph from the CSV to visualize
-S_RESOLUTION = 50  # Number of points for s interpolation
-MAX_EIGENVALUES_TO_PLOT = 50  # Show only first N eigenvalues (None for all)
+CSV_FILENAME = "outputs/Delta_min_3_regular_N12_sparse_k2_final.csv"
+GRAPH_ID = 18  # Which graph from the CSV to visualize
+S_RESOLUTION = 100  # Number of points for s interpolation
+MAX_EIGENVALUES_TO_PLOT = 6  # Show only first N eigenvalues (None for all)
 # ============================================================================
 
 def load_graph_from_csv(csv_filename, graph_id):
@@ -83,16 +84,25 @@ H_B = build_H_initial_sparse(N)
 H_P = build_H_problem_sparse(N, edges)
 print("  ✓ Done")
 
-# Compute full spectrum evolution with proper degeneracy handling
-print(f"\n🔬 Analyzing spectrum evolution (following spectral_gap_analysis.py methodology)...")
-print(f"   • Computing eigenvalues at {S_RESOLUTION} points along s ∈ [0,1]")
-print(f"   • System dimension: {2**N}×{2**N}")
-
+# Compute spectrum evolution with proper degeneracy handling
 s_points = np.linspace(0, 1, S_RESOLUTION)
 num_edges = len(edges)
 
-# Use shared analysis function
-analysis_result = analyze_spectrum_for_visualization(H_B, H_P, s_points, num_edges)
+# Choose sparse vs dense based on whether we're limiting eigenvalues
+if MAX_EIGENVALUES_TO_PLOT is not None:
+    # Use SPARSE method - only compute k lowest eigenvalues (much faster)
+    print(f"\n🔬 Analyzing spectrum evolution (SPARSE method)...")
+    print(f"   • Computing {MAX_EIGENVALUES_TO_PLOT} lowest eigenvalues at {S_RESOLUTION} points along s ∈ [0,1]")
+    print(f"   • System dimension: {2**N}×{2**N} (using Lanczos, not full diagonalization)")
+    analysis_result = analyze_spectrum_for_visualization_sparse(
+        H_B, H_P, s_points, num_edges, k_eigenvalues=MAX_EIGENVALUES_TO_PLOT
+    )
+else:
+    # Use DENSE method - compute all 2^N eigenvalues (for full spectrum visualization)
+    print(f"\n🔬 Analyzing spectrum evolution (DENSE method)...")
+    print(f"   • Computing all {2**N} eigenvalues at {S_RESOLUTION} points along s ∈ [0,1]")
+    print(f"   • System dimension: {2**N}×{2**N}")
+    analysis_result = analyze_spectrum_for_visualization(H_B, H_P, s_points, num_edges)
 
 all_eigenvalues = analysis_result['all_eigenvalues']
 min_gap = analysis_result['min_gap']
@@ -117,17 +127,20 @@ print(f"  • Match: {'✓' if abs(min_gap - graph_data['Delta_min']) < 0.001 el
 # Create the plot
 print(f"\n📈 Creating visualization...")
 
-# Determine which eigenvalues to plot
+# Determine which eigenvalues to plot (handle both sparse and dense cases)
+num_computed_eigenvalues = all_eigenvalues.shape[1]  # Actual number computed
 if MAX_EIGENVALUES_TO_PLOT is not None:
-    eigenvalues_to_show = min(MAX_EIGENVALUES_TO_PLOT, 2**N)
-    print(f"   • Plotting first {eigenvalues_to_show} eigenvalues (out of {2**N} total)")
-    # Always ensure highlighted levels are visible
+    # Sparse mode: we only have k eigenvalues computed
+    eigenvalues_to_show = min(MAX_EIGENVALUES_TO_PLOT, num_computed_eigenvalues)
+    print(f"   • Plotting first {eigenvalues_to_show} eigenvalues (computed {num_computed_eigenvalues} of {2**N} total)")
+    # Ensure highlighted levels are visible (already guaranteed by sparse function)
     if min_gap_level2 >= eigenvalues_to_show:
-        eigenvalues_to_show = min_gap_level2 + 1
+        eigenvalues_to_show = min(min_gap_level2 + 1, num_computed_eigenvalues)
         print(f"   • Extended to {eigenvalues_to_show} to include min gap level E_{min_gap_level2}")
 else:
-    eigenvalues_to_show = 2**N
-    print(f"   • Plotting all {2**N} eigenvalues")
+    # Dense mode: we have all 2^N eigenvalues
+    eigenvalues_to_show = num_computed_eigenvalues
+    print(f"   • Plotting all {num_computed_eigenvalues} eigenvalues")
 
 fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -160,10 +173,10 @@ ax.set_ylabel('Energy', fontsize=14)
 # Update title based on whether we're showing all eigenvalues
 title_str = f'Energy Spectrum Evolution - AQC MaxCut\n'
 title_str += f'Graph ID={GRAPH_ID}, N={N}'
-if eigenvalues_to_show < 2**N:
-    title_str += f' (showing first {eigenvalues_to_show}/{2**N} eigenvalues)'
+if MAX_EIGENVALUES_TO_PLOT is not None:
+    title_str += f' (showing {eigenvalues_to_show} lowest eigenvalues, sparse method)'
 else:
-    title_str += f' ({2**N} eigenvalues)'
+    title_str += f' (all {2**N} eigenvalues)'
     
 ax.set_title(title_str, fontsize=16, fontweight='bold')
 ax.grid(True, alpha=0.3)
