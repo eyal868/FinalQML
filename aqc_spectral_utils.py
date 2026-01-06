@@ -116,6 +116,53 @@ def build_H_problem_sparse_weighted(N: int, edges: List[Tuple[int, int]],
     return diags(diagonal, 0, format='csr', dtype=np.float64)
 
 
+def compute_weighted_optimal_cut(edges: List[Tuple[int, int]], 
+                                  weights: List[float],
+                                  n_qubits: int) -> Tuple[float, str]:
+    """
+    Compute the optimal weighted Max-Cut value by exhaustive enumeration.
+    
+    For small graphs (N <= 20), evaluates all 2^N possible cuts to find
+    the maximum weighted cut value.
+    
+    Args:
+        edges: List of edges as (i, j) tuples with 0-based indexing
+        weights: List of weights for each edge (same order as edges)
+        n_qubits: Number of qubits (graph vertices)
+        
+    Returns:
+        Tuple of (max_cut_value, best_bitstring)
+        
+    Note:
+        For unweighted graphs, pass weights=[1.0]*len(edges).
+        Complexity: O(2^N × |E|), only feasible for N <= 20.
+    """
+    if n_qubits > 20:
+        raise ValueError(f"Exhaustive enumeration not feasible for N={n_qubits} > 20")
+    
+    if len(edges) != len(weights):
+        raise ValueError(f"Number of weights ({len(weights)}) must match edges ({len(edges)})")
+    
+    max_cut_value = 0.0
+    best_bitstring = '0' * n_qubits
+    
+    # Evaluate all 2^N possible assignments
+    for state in range(2 ** n_qubits):
+        bitstring = format(state, f'0{n_qubits}b')
+        
+        # Calculate weighted cut value
+        cut_value = 0.0
+        for (u, v), weight in zip(edges, weights):
+            if bitstring[u] != bitstring[v]:
+                cut_value += weight
+        
+        if cut_value > max_cut_value:
+            max_cut_value = cut_value
+            best_bitstring = bitstring
+    
+    return max_cut_value, best_bitstring
+
+
 def get_aqc_hamiltonian_sparse(s: float, H_B_sparse: csr_matrix, H_P_sparse: csr_matrix) -> csr_matrix:
     """
     Build interpolated AQC Hamiltonian as sparse matrix: H(s) = (1-s)·H_initial + s·H_problem.

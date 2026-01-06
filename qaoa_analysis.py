@@ -71,23 +71,32 @@ VERBOSE_PARALLEL = False         # Print detailed output in parallel mode
 # 2. HELPER FUNCTIONS: BUILD COST HAMILTONIAN
 # =========================================================================
 
-def edges_to_cost_hamiltonian(edges: List[Tuple[int, int]], n_qubits: int) -> SparsePauliOp:
+def edges_to_cost_hamiltonian(edges: List[Tuple[int, int]], n_qubits: int, 
+                               weights: List[float] = None) -> SparsePauliOp:
     """
     Constructs the Max-Cut cost Hamiltonian as a SparsePauliOp.
     
-    For Max-Cut: H_cost = ∑_{(i,j)∈E} Z_i Z_j
+    For Max-Cut: H_cost = ∑_{(i,j)∈E} w_{ij} Z_i Z_j
     
     Args:
         edges: List of edges as (vertex1, vertex2) tuples
         n_qubits: Number of qubits (nodes in graph)
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
         SparsePauliOp representing the cost Hamiltonian
     """
+    # Default to unit weights if not provided
+    if weights is None:
+        weights = [1.0] * len(edges)
+    
+    if len(weights) != len(edges):
+        raise ValueError(f"Number of weights ({len(weights)}) must match number of edges ({len(edges)})")
+    
     # Build list of Pauli strings and coefficients
     pauli_list = []
     
-    for u, v in edges:
+    for (u, v), weight in zip(edges, weights):
         # Create Pauli string: Z on qubits u and v, I elsewhere
         pauli_str = ['I'] * n_qubits
         pauli_str[u] = 'Z'
@@ -96,8 +105,8 @@ def edges_to_cost_hamiltonian(edges: List[Tuple[int, int]], n_qubits: int) -> Sp
         # Qiskit uses little-endian: reverse the string
         pauli_str_reversed = ''.join(pauli_str[::-1])
         
-        # Add to list with coefficient +1.0
-        pauli_list.append((pauli_str_reversed, 1.0))
+        # Add to list with edge weight as coefficient
+        pauli_list.append((pauli_str_reversed, weight))
     
     # Create SparsePauliOp from list
     cost_hamiltonian = SparsePauliOp.from_list(pauli_list)
@@ -105,26 +114,33 @@ def edges_to_cost_hamiltonian(edges: List[Tuple[int, int]], n_qubits: int) -> Sp
     return cost_hamiltonian
 
 
-def evaluate_cut_value(bitstring: str, edges: List[Tuple[int, int]]) -> int:
+def evaluate_cut_value(bitstring: str, edges: List[Tuple[int, int]], 
+                       weights: List[float] = None) -> float:
     """
     Evaluate the cut value for a given bitstring assignment.
     
     Args:
         bitstring: Binary string (e.g., '01010')
         edges: List of edges
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
-        Number of edges in the cut
+        Cut value (sum of weights of cut edges, or count if unweighted)
     """
-    cut_value = 0
-    for u, v in edges:
+    # Default to unit weights if not provided
+    if weights is None:
+        weights = [1.0] * len(edges)
+    
+    cut_value = 0.0
+    for (u, v), weight in zip(edges, weights):
         # Edge is in cut if endpoints have different values
         if bitstring[u] != bitstring[v]:
-            cut_value += 1
+            cut_value += weight
     return cut_value
 
 
-def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]]) -> float:
+def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]],
+                           weights: List[float] = None) -> float:
     """
     Calculate expected cut value from measurement counts.
     
@@ -133,6 +149,7 @@ def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]])
     Args:
         counts: Dictionary mapping bitstrings to counts
         edges: List of edges
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
         Expected cut value (as float)
@@ -142,7 +159,7 @@ def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]])
     
     for bitstring, count in counts.items():
         prob = count / total_shots
-        cut_val = evaluate_cut_value(bitstring, edges)
+        cut_val = evaluate_cut_value(bitstring, edges, weights)
         expected_cut += prob * cut_val
     
     return expected_cut
@@ -205,7 +222,8 @@ def run_qaoa_multistart(edges: List[Tuple[int, int]],
                         initial_params: np.ndarray = None,
                         optimal_cut: float = None,
                         num_attempts: int = 3,
-                        early_stop_ratio: float = 0.95) -> Dict:
+                        early_stop_ratio: float = 0.95,
+                        weights: List[float] = None) -> Dict:
     """
     Run QAOA with multiple random initializations, keeping the best result.
     
@@ -218,6 +236,7 @@ def run_qaoa_multistart(edges: List[Tuple[int, int]],
         optimal_cut: Known optimal cut value (for early stopping)
         num_attempts: Number of random starts to try
         early_stop_ratio: Stop if approximation ratio reaches this threshold
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
         Best result dictionary from all attempts
@@ -241,7 +260,8 @@ def run_qaoa_multistart(edges: List[Tuple[int, int]],
             n_qubits=n_qubits,
             p=p,
             max_iter=max_iter,
-            initial_params=attempt_params
+            initial_params=attempt_params,
+            weights=weights
         )
         
         expected_cut = result['expected_cut']
@@ -270,7 +290,8 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
                     n_qubits: int,
                     p: int = 1,
                     max_iter: int = 200,
-                    initial_params: np.ndarray = None) -> Dict:
+                    initial_params: np.ndarray = None,
+                    weights: List[float] = None) -> Dict:
     """
     Run QAOA on a Max-Cut problem instance (single optimization attempt).
     
@@ -280,6 +301,7 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
         p: Number of QAOA layers
         max_iter: Maximum optimizer iterations
         initial_params: Initial parameter values (random if None)
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
         Dictionary with results:
@@ -290,8 +312,12 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
         - 'optimization_time': Time spent in optimization (seconds)
         - 'optimal_params': Optimal parameters found
     """
+    # Default to unit weights if not provided
+    if weights is None:
+        weights = [1.0] * len(edges)
+    
     # Build cost Hamiltonian
-    cost_hamiltonian = edges_to_cost_hamiltonian(edges, n_qubits)
+    cost_hamiltonian = edges_to_cost_hamiltonian(edges, n_qubits, weights)
     
     # Create QAOA ansatz circuit
     qaoa_circuit = QAOAAnsatz(cost_hamiltonian, reps=p)
@@ -333,14 +359,14 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
             # Reverse bitstring (Qiskit little-endian)
             bitstring_reversed = bitstring[::-1]
             
-            # Calculate energy for this bitstring
+            # Calculate energy for this bitstring (weighted)
             energy = 0.0
-            for u, v in edges:
-                # Z_i Z_j eigenvalue: +1 if same, -1 if different
+            for (u, v), weight in zip(edges, weights):
+                # Z_i Z_j eigenvalue: +w if same, -w if different
                 if bitstring_reversed[u] == bitstring_reversed[v]:
-                    energy += 1.0
+                    energy += weight
                 else:
-                    energy -= 1.0
+                    energy -= weight
             
             expectation += (count / total_shots) * energy
         
@@ -392,10 +418,10 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
     most_probable_bitstring = max(counts_reversed, key=counts_reversed.get)
     most_probable_count = counts_reversed[most_probable_bitstring]
     most_probable_prob = most_probable_count / NUM_SHOTS
-    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges)
+    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges, weights)
     
     # Calculate expected cut value (correct approximation ratio)
-    expected_cut = calculate_expected_cut(counts_reversed, edges)
+    expected_cut = calculate_expected_cut(counts_reversed, edges, weights)
     
     # Best measured bitstring (for reference)
     best_bitstring = most_probable_bitstring
@@ -421,7 +447,8 @@ def run_qaoa(edges: List[Tuple[int, int]],
              p: int = 1,
              max_iter: int = 200,
              initial_params: np.ndarray = None,
-             optimal_cut: float = None) -> Dict:
+             optimal_cut: float = None,
+             weights: List[float] = None) -> Dict:
     """
     Run QAOA with automatic multi-start for high p values.
     
@@ -435,6 +462,7 @@ def run_qaoa(edges: List[Tuple[int, int]],
         max_iter: Maximum optimizer iterations
         initial_params: Initial parameter values (for warm-start or heuristic)
         optimal_cut: Known optimal cut value (for early stopping in multi-start)
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
         
     Returns:
         Dictionary with QAOA results (same format as run_qaoa_single)
@@ -449,7 +477,8 @@ def run_qaoa(edges: List[Tuple[int, int]],
             initial_params=initial_params,
             optimal_cut=optimal_cut,
             num_attempts=MULTISTART_NUM_ATTEMPTS,
-            early_stop_ratio=MULTISTART_EARLY_STOP_RATIO
+            early_stop_ratio=MULTISTART_EARLY_STOP_RATIO,
+            weights=weights
         )
     else:
         return run_qaoa_single(
@@ -457,7 +486,8 @@ def run_qaoa(edges: List[Tuple[int, int]],
             n_qubits=n_qubits,
             p=p,
             max_iter=max_iter,
-            initial_params=initial_params
+            initial_params=initial_params,
+            weights=weights
         )
 
 
@@ -608,13 +638,17 @@ def process_single_graph(args):
     return p_results
 
 
-def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=None):
+def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=None, weights=None):
     """
     Run QAOA without verbose output - for parallel processing.
     Same as run_qaoa_single but without print statements.
     """
+    # Default to unit weights if not provided
+    if weights is None:
+        weights = [1.0] * len(edges)
+    
     # Build cost Hamiltonian
-    cost_hamiltonian = edges_to_cost_hamiltonian(edges, n_qubits)
+    cost_hamiltonian = edges_to_cost_hamiltonian(edges, n_qubits, weights)
     
     # Create QAOA ansatz circuit
     qaoa_circuit = QAOAAnsatz(cost_hamiltonian, reps=p)
@@ -647,11 +681,11 @@ def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=Non
         for bitstring, count in counts.items():
             bitstring_reversed = bitstring[::-1]
             energy = 0.0
-            for u, v in edges:
+            for (u, v), weight in zip(edges, weights):
                 if bitstring_reversed[u] == bitstring_reversed[v]:
-                    energy += 1.0
+                    energy += weight
                 else:
-                    energy -= 1.0
+                    energy -= weight
             expectation += (count / total_shots) * energy
         
         return expectation
@@ -691,8 +725,8 @@ def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=Non
     most_probable_bitstring = max(counts_reversed, key=counts_reversed.get)
     most_probable_count = counts_reversed[most_probable_bitstring]
     most_probable_prob = most_probable_count / NUM_SHOTS
-    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges)
-    expected_cut = calculate_expected_cut(counts_reversed, edges)
+    most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges, weights)
+    expected_cut = calculate_expected_cut(counts_reversed, edges, weights)
     
     return {
         'best_bitstring': most_probable_bitstring,
@@ -709,7 +743,8 @@ def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=Non
 
 
 def run_qaoa_multistart_quiet(edges, n_qubits, p, max_iter, initial_params=None,
-                               optimal_cut=None, num_attempts=3, early_stop_ratio=0.95):
+                               optimal_cut=None, num_attempts=3, early_stop_ratio=0.95,
+                               weights=None):
     """
     Run QAOA multistart without verbose output - for parallel processing.
     """
@@ -728,7 +763,8 @@ def run_qaoa_multistart_quiet(edges, n_qubits, p, max_iter, initial_params=None,
             n_qubits=n_qubits,
             p=p,
             max_iter=max_iter,
-            initial_params=attempt_params
+            initial_params=attempt_params,
+            weights=weights
         )
         
         expected_cut = result['expected_cut']

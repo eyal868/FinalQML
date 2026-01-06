@@ -32,11 +32,11 @@ from scipy.sparse.linalg import eigsh
 # ============================================================================
 RESULTS_CSV = "outputs/weighted_gap_analysis_N12.csv"
 GRAPH_FILE = "graphs_rawdata/12_3_3.scd"
-GRAPH_ID = 13       # Which graph to visualize
-TRIAL = 9           # Which trial (the one with gap 0.024432)
+GRAPH_ID = 10      # Which graph to visualize
+TRIAL = 10           # Which trial (the one with gap 0.024432)
 N = 12              # Number of qubits
 S_RESOLUTION = 100  # Number of points for s interpolation
-MAX_EIGENVALUES_TO_PLOT = 6  # Show only first N eigenvalues
+MAX_EIGENVALUES_TO_PLOT = 20  # Show only first N eigenvalues
 # ============================================================================
 
 

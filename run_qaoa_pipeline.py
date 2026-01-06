@@ -33,8 +33,8 @@ from plot_p_star_vs_gap import plot_p_star_vs_gap
 # =========================================================================
 
 # Input/Output
-DEFAULT_INPUT = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
-DEFAULT_OUTPUT_DIR = 'outputs/pipeline_full_N14/'
+DEFAULT_INPUT = 'outputs/weighted_gap_analysis_N12.csv'
+DEFAULT_OUTPUT_DIR = 'outputs/pipeline_full_N12_weighted/'
 
 # QAOA Parameters
 DEFAULT_DEGENERACY = None  # None = process all, int = filter to specific degeneracy

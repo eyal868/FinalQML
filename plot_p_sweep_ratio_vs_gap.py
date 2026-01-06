@@ -32,8 +32,8 @@ import re
 import os
 
 # Configuration defaults
-DEFAULT_INPUT = 'DataOutputs/QAOA_p_sweep_N12_p1to10.csv'
-DEFAULT_OUTPUT_DIR = 'outputs/'
+DEFAULT_INPUT = 'outputs/weighted_qaoa_pipeline/weighted_QAOA_N12_p1to5.csv'
+DEFAULT_OUTPUT_DIR = 'outputs/weighted_qaoa_pipeline'
 
 
 def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = False) -> str:
@@ -59,6 +59,21 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
     
     # Extract N for output filename
     N_value = df['N'].iloc[0]
+    
+    # Auto-detect gap column (supports both unweighted and weighted results)
+    if 'Delta_min' in df.columns:
+        gap_col = 'Delta_min'
+        gap_label = 'Spectral Gap (Δ_min)'
+    elif 'Weighted_Delta_min' in df.columns:
+        gap_col = 'Weighted_Delta_min'
+        gap_label = 'Weighted Spectral Gap (Δ_min)'
+    else:
+        print(f"\n❌ ERROR: No gap column found in {input_csv}")
+        print(f"   Expected 'Delta_min' or 'Weighted_Delta_min'")
+        print(f"   Available columns: {', '.join(df.columns.tolist())}")
+        return None
+    
+    print(f"   Using gap column: {gap_col}")
     
     # Auto-detect available p values from column names
     ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
@@ -104,7 +119,7 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         
         # Get data for this p
         ratio_col = f'p{p}_approx_ratio'
-        x = df['Delta_min'].values
+        x = df[gap_col].values
         y = df[ratio_col].values
         
         # Remove any invalid values
@@ -140,7 +155,7 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         
         # Axis labels (dynamic based on grid)
         if idx >= (n_rows - 1) * n_cols:  # Bottom row
-            ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=10)
+            ax.set_xlabel(gap_label, fontsize=10)
         if idx % n_cols == 0:  # Left column
             ax.set_ylabel('Approximation Ratio', fontsize=10)
         
