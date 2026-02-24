@@ -37,24 +37,37 @@ DEFAULT_THRESHOLDS = [0.75, 0.80, 0.85, 0.90, 0.95]
 
 
 def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
-                       thresholds: list = None, show_plot: bool = False) -> str:
+                       thresholds: list = None, show_plot: bool = False,
+                       metric: str = 'approx_ratio') -> str:
     """
     Generate p* (minimum depth required) vs spectral gap plots.
 
     Args:
         input_csv: Path to QAOA results CSV file
         output_dir: Output directory for PNG file (default: same as input file)
-        thresholds: List of approximation ratio thresholds (default: [0.75, 0.80, 0.85, 0.90, 0.95])
+        thresholds: List of thresholds for the given metric (default: [0.75, 0.80, 0.85, 0.90, 0.95])
         show_plot: Whether to display the plot interactively (default: False)
+        metric: Which metric to use for threshold. Options:
+            'approx_ratio' (default) - approximation ratio
+            'success_prob' - success probability
 
     Returns:
         Path to saved PNG file
     """
     if thresholds is None:
-        thresholds = DEFAULT_THRESHOLDS
+        if metric == 'success_prob':
+            thresholds = [0.10, 0.20, 0.30, 0.40, 0.50]
+        else:
+            thresholds = DEFAULT_THRESHOLDS
+
+    metric_labels = {
+        'approx_ratio': 'Approximation Ratio',
+        'success_prob': 'Success Probability',
+    }
+    metric_label = metric_labels.get(metric, metric)
 
     print("=" * 70)
-    print("  QAOA p*: MINIMUM DEPTH REQUIRED vs SPECTRAL GAP")
+    print(f"  QAOA p*: MINIMUM DEPTH REQUIRED vs SPECTRAL GAP ({metric_label})")
     print("=" * 70)
 
     # Load data
@@ -94,7 +107,7 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
         for idx, row in df.iterrows():
             # Find minimum p that achieves threshold
             for p in P_VALUES:
-                ratio_col = f'p{p}_approx_ratio'
+                ratio_col = f'p{p}_{metric}'
                 if pd.notna(row[ratio_col]) and row[ratio_col] >= threshold:
                     p_star_list.append(p)
                     break

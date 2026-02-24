@@ -165,6 +165,37 @@ def calculate_expected_cut(counts: Dict[str, int], edges: List[Tuple[int, int]],
     return expected_cut
 
 
+def calculate_success_probability(counts: Dict[str, int], edges: List[Tuple[int, int]],
+                                   optimal_cut: float, weights: List[float] = None,
+                                   tol: float = 1e-6) -> float:
+    """
+    Calculate the probability of measuring an optimal solution.
+
+    P_success = sum of P(x) for all bitstrings x where cut_value(x) == optimal_cut.
+    This naturally handles degeneracy — both bit-flip symmetric solutions
+    (and any other degenerate optima) are counted.
+
+    Args:
+        counts: Dictionary mapping bitstrings to measurement counts
+        edges: List of edges
+        optimal_cut: Known optimal cut value
+        weights: Optional list of edge weights (default: all 1.0 for unweighted)
+        tol: Tolerance for floating-point comparison (for weighted graphs)
+
+    Returns:
+        Success probability in [0, 1]
+    """
+    total_shots = sum(counts.values())
+    success_count = 0
+
+    for bitstring, count in counts.items():
+        cut_val = evaluate_cut_value(bitstring, edges, weights)
+        if abs(cut_val - optimal_cut) < tol:
+            success_count += count
+
+    return success_count / total_shots
+
+
 # =========================================================================
 # 3. OPTIMIZATION IMPROVEMENT FUNCTIONS
 # =========================================================================
@@ -261,7 +292,8 @@ def run_qaoa_multistart(edges: List[Tuple[int, int]],
             p=p,
             max_iter=max_iter,
             initial_params=attempt_params,
-            weights=weights
+            weights=weights,
+            optimal_cut=optimal_cut
         )
 
         expected_cut = result['expected_cut']
@@ -291,7 +323,8 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
                     p: int = 1,
                     max_iter: int = 200,
                     initial_params: np.ndarray = None,
-                    weights: List[float] = None) -> Dict:
+                    weights: List[float] = None,
+                    optimal_cut: float = None) -> Dict:
     """
     Run QAOA on a Max-Cut problem instance (single optimization attempt).
 
@@ -423,6 +456,12 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
     # Calculate expected cut value (correct approximation ratio)
     expected_cut = calculate_expected_cut(counts_reversed, edges, weights)
 
+    # Calculate success probability if optimal_cut is known
+    success_prob = None
+    if optimal_cut is not None:
+        success_prob = calculate_success_probability(
+            counts_reversed, edges, optimal_cut, weights)
+
     # Best measured bitstring (for reference)
     best_bitstring = most_probable_bitstring
     best_cut_value = most_probable_cut
@@ -434,6 +473,7 @@ def run_qaoa_single(edges: List[Tuple[int, int]],
         'most_probable_prob': most_probable_prob,
         'most_probable_cut': most_probable_cut,
         'expected_cut': expected_cut,
+        'success_prob': success_prob,
         'num_iterations': iteration_count[0],
         'final_cost': result.fun,
         'optimization_time': optimization_time,
@@ -487,7 +527,8 @@ def run_qaoa(edges: List[Tuple[int, int]],
             p=p,
             max_iter=max_iter,
             initial_params=initial_params,
-            weights=weights
+            weights=weights,
+            optimal_cut=optimal_cut
         )
 
 
@@ -599,7 +640,8 @@ def process_single_graph(args):
                     n_qubits=n_qubits,
                     p=p,
                     max_iter=max_iter,
-                    initial_params=initial_params
+                    initial_params=initial_params,
+                    optimal_cut=optimal_cut
                 )
 
             # Store optimal params for next iteration
@@ -614,6 +656,7 @@ def process_single_graph(args):
             # Store results
             p_results[f'p{p}_expected_cut'] = expected_cut
             p_results[f'p{p}_approx_ratio'] = approx_ratio
+            p_results[f'p{p}_success_prob'] = qaoa_result.get('success_prob', -1)
             p_results[f'p{p}_most_prob_cut'] = qaoa_result['most_probable_cut']
             p_results[f'p{p}_most_prob_prob'] = qaoa_result['most_probable_prob']
             p_results[f'p{p}_iterations'] = qaoa_result['num_iterations']
@@ -630,6 +673,7 @@ def process_single_graph(args):
         for p in p_values:
             p_results[f'p{p}_expected_cut'] = -1
             p_results[f'p{p}_approx_ratio'] = -1
+            p_results[f'p{p}_success_prob'] = -1
             p_results[f'p{p}_most_prob_cut'] = -1
             p_results[f'p{p}_most_prob_prob'] = -1
             p_results[f'p{p}_iterations'] = -1
@@ -638,7 +682,7 @@ def process_single_graph(args):
     return p_results
 
 
-def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=None, weights=None):
+def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=None, weights=None, optimal_cut=None):
     """
     Run QAOA without verbose output - for parallel processing.
     Same as run_qaoa_single but without print statements.
@@ -728,6 +772,11 @@ def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=Non
     most_probable_cut = evaluate_cut_value(most_probable_bitstring, edges, weights)
     expected_cut = calculate_expected_cut(counts_reversed, edges, weights)
 
+    success_prob = None
+    if optimal_cut is not None:
+        success_prob = calculate_success_probability(
+            counts_reversed, edges, optimal_cut, weights)
+
     return {
         'best_bitstring': most_probable_bitstring,
         'best_cut_value': most_probable_cut,
@@ -735,6 +784,7 @@ def run_qaoa_single_quiet(edges, n_qubits, p=1, max_iter=200, initial_params=Non
         'most_probable_prob': most_probable_prob,
         'most_probable_cut': most_probable_cut,
         'expected_cut': expected_cut,
+        'success_prob': success_prob,
         'num_iterations': iteration_count[0],
         'final_cost': result.fun,
         'optimization_time': optimization_time,
@@ -764,7 +814,8 @@ def run_qaoa_multistart_quiet(edges, n_qubits, p, max_iter, initial_params=None,
             p=p,
             max_iter=max_iter,
             initial_params=attempt_params,
-            weights=weights
+            weights=weights,
+            optimal_cut=optimal_cut
         )
 
         expected_cut = result['expected_cut']
@@ -1050,12 +1101,13 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV, use_parallel: bool = None
                 # Store results for this p
                 p_results[f'p{p}_expected_cut'] = expected_cut
                 p_results[f'p{p}_approx_ratio'] = approx_ratio
+                p_results[f'p{p}_success_prob'] = qaoa_result.get('success_prob', -1)
                 p_results[f'p{p}_most_prob_cut'] = qaoa_result['most_probable_cut']
                 p_results[f'p{p}_most_prob_prob'] = qaoa_result['most_probable_prob']
                 p_results[f'p{p}_iterations'] = qaoa_result['num_iterations']
                 p_results[f'p{p}_time'] = p_time
 
-                print(f"ratio={approx_ratio:.4f}, time={p_time:.1f}s")
+                print(f"ratio={approx_ratio:.4f}, success_prob={qaoa_result.get('success_prob', 'N/A')}, time={p_time:.1f}s")
 
             results_data.append(p_results)
 
@@ -1082,6 +1134,7 @@ def analyze_graphs_from_csv(csv_path: str = INPUT_CSV, use_parallel: bool = None
             for p in P_VALUES_TO_TEST:
                 p_results[f'p{p}_expected_cut'] = -1
                 p_results[f'p{p}_approx_ratio'] = -1
+                p_results[f'p{p}_success_prob'] = -1
                 p_results[f'p{p}_most_prob_cut'] = -1
                 p_results[f'p{p}_most_prob_prob'] = -1
                 p_results[f'p{p}_iterations'] = -1

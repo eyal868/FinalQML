@@ -39,20 +39,30 @@ DEFAULT_INPUT = 'outputs/exploratory/weighted_qaoa_pipeline/weighted_qaoa_N12_p1
 DEFAULT_OUTPUT_DIR = 'outputs/exploratory/weighted_qaoa_pipeline'
 
 
-def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = False) -> str:
+def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = False,
+                       metric: str = 'approx_ratio') -> str:
     """
-    Generate approximation ratio vs spectral gap plots for each QAOA depth.
+    Generate QAOA metric vs spectral gap plots for each QAOA depth.
 
     Args:
         input_csv: Path to QAOA results CSV file
         output_dir: Output directory for PNG file (default: same as input file)
         show_plot: Whether to display the plot interactively (default: False)
+        metric: Which metric to plot. Options:
+            'approx_ratio' (default) - approximation ratio
+            'success_prob' - success probability of measuring optimal solution
 
     Returns:
         Path to saved PNG file
     """
+    metric_labels = {
+        'approx_ratio': 'Approximation Ratio',
+        'success_prob': 'Success Probability',
+    }
+    metric_label = metric_labels.get(metric, metric)
+
     print("=" * 70)
-    print("  QAOA P-SWEEP: APPROXIMATION RATIO vs SPECTRAL GAP")
+    print(f"  QAOA P-SWEEP: {metric_label.upper()} vs SPECTRAL GAP")
     print("=" * 70)
 
     # Load data
@@ -81,6 +91,15 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         print(f"   Expected columns like 'p1_approx_ratio', 'p2_approx_ratio', etc.")
         print(f"   Available columns: {', '.join(df.columns.tolist())}")
         return None
+
+    # Verify metric columns exist
+    if metric != 'approx_ratio':
+        test_col = f'p{P_VALUES[0]}_{metric}'
+        if test_col not in df.columns:
+            print(f"\n⚠️ WARNING: Metric '{metric}' not found (no column '{test_col}')")
+            print(f"   Falling back to 'approx_ratio'")
+            metric = 'approx_ratio'
+            metric_label = metric_labels['approx_ratio']
     max_p = max(P_VALUES)
     min_p = min(P_VALUES)
 
@@ -95,7 +114,7 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
 
     # Create figure with dynamic subplot grid
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
-    fig.suptitle(f'Approximation Ratio vs Spectral Gap Across QAOA Depths (N={N_value})',
+    fig.suptitle(f'{metric_label} vs Spectral Gap Across QAOA Depths (N={N_value})',
                  fontsize=16, fontweight='bold', y=0.99)
 
     # Flatten axes for easier iteration (handle both 1D and 2D cases)
@@ -113,7 +132,7 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         ax = axes_flat[idx]
 
         # Get data for this p
-        ratio_col = f'p{p}_approx_ratio'
+        ratio_col = f'p{p}_{metric}'
         x = df[gap_col].values
         y = df[ratio_col].values
 
@@ -152,14 +171,18 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         if idx >= (n_rows - 1) * n_cols:  # Bottom row
             ax.set_xlabel(gap_label, fontsize=10)
         if idx % n_cols == 0:  # Left column
-            ax.set_ylabel('Approximation Ratio', fontsize=10)
+            ax.set_ylabel(metric_label, fontsize=10)
 
         # Grid
         ax.grid(True, alpha=0.3)
 
         # Y-axis limits (reasonable range)
-        y_min = max(0.5, y_valid.min() - 0.05) if len(y_valid) > 0 else 0.5
-        y_max = min(1.05, y_valid.max() + 0.05) if len(y_valid) > 0 else 1.0
+        if metric == 'success_prob':
+            y_min = max(0.0, y_valid.min() - 0.05) if len(y_valid) > 0 else 0.0
+            y_max = min(1.05, y_valid.max() + 0.05) if len(y_valid) > 0 else 1.0
+        else:
+            y_min = max(0.5, y_valid.min() - 0.05) if len(y_valid) > 0 else 0.5
+            y_max = min(1.05, y_valid.max() + 0.05) if len(y_valid) > 0 else 1.0
         ax.set_ylim([y_min, y_max])
 
     # Hide any unused subplots
@@ -179,11 +202,12 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
     input_basename = os.path.basename(input_csv)  # Get filename without path
     input_name_no_ext = os.path.splitext(input_basename)[0]  # Remove extension
 
-    # Replace "QAOA_p_sweep" with "ratio_vs_gap", or prepend if not present
+    # Generate output name based on metric
+    metric_prefix = "success_prob_vs_gap" if metric == 'success_prob' else "ratio_vs_gap"
     if input_name_no_ext.startswith("QAOA_p_sweep"):
-        output_name = input_name_no_ext.replace("QAOA_p_sweep", "ratio_vs_gap", 1)
+        output_name = input_name_no_ext.replace("QAOA_p_sweep", metric_prefix, 1)
     else:
-        output_name = f"ratio_vs_gap_{input_name_no_ext}"
+        output_name = f"{metric_prefix}_{input_name_no_ext}"
 
     output_file = os.path.join(output_dir, f"{output_name}.png")
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -198,9 +222,9 @@ def plot_ratio_vs_gap(input_csv: str, output_dir: str = None, show_plot: bool = 
         print(f"  ⚠️ Desktop copy skipped: {e}")
 
     # Summary statistics
-    print(f"\n📈 Summary Statistics:")
+    print(f"\n📈 Summary Statistics ({metric_label}):")
     for p in P_VALUES:
-        ratio_col = f'p{p}_approx_ratio'
+        ratio_col = f'p{p}_{metric}'
         if ratio_col in df.columns:
             valid_ratios = df[df[ratio_col] >= 0][ratio_col]
             if len(valid_ratios) > 0:

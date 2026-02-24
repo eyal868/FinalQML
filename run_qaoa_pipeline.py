@@ -116,6 +116,24 @@ Examples:
     parser.add_argument('--workers', '-w', type=int, default=DEFAULT_WORKERS,
                         help='Number of worker processes (default: all CPU cores)')
 
+    # Random graph source
+    parser.add_argument('--graph-source', type=str, default='genreg',
+                        choices=['genreg', 'random'],
+                        help='Graph source: genreg (enumerated) or random (generated)')
+    parser.add_argument('--random-model', type=str, default='erdos_renyi',
+                        choices=['erdos_renyi', 'random_regular', 'watts_strogatz'],
+                        help='Random graph model (with --graph-source random)')
+    parser.add_argument('--random-N', type=int, default=10,
+                        help='Number of vertices for random graphs (default: 10)')
+    parser.add_argument('--random-num-graphs', type=int, default=20,
+                        help='Number of random graphs to generate (default: 20)')
+    parser.add_argument('--random-edge-prob', type=float, default=0.5,
+                        help='Edge probability for Erdos-Renyi (default: 0.5)')
+    parser.add_argument('--random-degree', type=int, default=3,
+                        help='Degree for random regular graphs (default: 3)')
+    parser.add_argument('--random-seed', type=int, default=42,
+                        help='Base random seed (default: 42)')
+
     return parser.parse_args()
 
 
@@ -162,7 +180,8 @@ def analyze_weighted_graph(
                 n_qubits=n_qubits,
                 p=p,
                 max_iter=max_iter,
-                weights=weights
+                weights=weights,
+                optimal_cut=optimal_cut
             )
 
             expected_cut = qaoa_result['expected_cut']
@@ -170,6 +189,7 @@ def analyze_weighted_graph(
 
             results[f'p{p}_expected_cut'] = expected_cut
             results[f'p{p}_approx_ratio'] = approx_ratio
+            results[f'p{p}_success_prob'] = qaoa_result.get('success_prob', -1)
             results[f'p{p}_best_bitstring'] = qaoa_result['best_bitstring']
             results[f'p{p}_best_cut'] = qaoa_result['best_cut_value']
             results[f'p{p}_iterations'] = qaoa_result['num_iterations']
@@ -178,6 +198,7 @@ def analyze_weighted_graph(
             print(f"      Error at p={p}: {e}")
             results[f'p{p}_expected_cut'] = -1
             results[f'p{p}_approx_ratio'] = -1
+            results[f'p{p}_success_prob'] = -1
             results[f'p{p}_best_bitstring'] = ""
             results[f'p{p}_best_cut'] = -1
             results[f'p{p}_iterations'] = -1
@@ -345,6 +366,7 @@ def run_qaoa_analysis_weighted(input_csv: str, output_dir: str,
         # Add per-p results
         for p in p_values:
             result_row[f'p{p}_approx_ratio'] = qaoa_results[f'p{p}_approx_ratio']
+            result_row[f'p{p}_success_prob'] = qaoa_results[f'p{p}_success_prob']
             result_row[f'p{p}_expected_cut'] = qaoa_results[f'p{p}_expected_cut']
             result_row[f'p{p}_iterations'] = qaoa_results[f'p{p}_iterations']
 
@@ -366,6 +388,55 @@ def run_qaoa_analysis_weighted(input_csv: str, output_dir: str,
     print(f"   Processed {len(df_results)} trials successfully")
 
     return output_path
+
+
+def run_random_graph_spectral_analysis(args) -> str:
+    """
+    Generate random graphs, compute spectral gaps, and save as CSV.
+
+    Returns: Path to the generated spectral gap CSV file.
+    """
+    from graph_generation import generate_random_graphs_batch, compute_spectral_gaps_for_graphs
+
+    print("\n" + "=" * 70)
+    print("  STEP 0: RANDOM GRAPH GENERATION + SPECTRAL GAP ANALYSIS")
+    print("=" * 70)
+
+    N = args.random_N
+    model = args.random_model
+    num_graphs = args.random_num_graphs
+
+    params = {}
+    if model == 'erdos_renyi':
+        params['edge_prob'] = args.random_edge_prob
+    elif model == 'random_regular':
+        params['degree'] = args.random_degree
+
+    print(f"   Generating {num_graphs} {model} graphs with N={N}...")
+    graphs = generate_random_graphs_batch(
+        N=N,
+        num_graphs=num_graphs,
+        model=model,
+        base_seed=args.random_seed,
+        **params
+    )
+    print(f"   Generated {len(graphs)} connected graphs")
+
+    print(f"   Computing spectral gaps...")
+    df_gaps = compute_spectral_gaps_for_graphs(
+        N=N,
+        graphs=graphs,
+        target_degeneracy=args.degeneracy,
+        verbose=True
+    )
+
+    # Save to output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    output_csv = os.path.join(args.output_dir, f"spectral_gap_{model}_N{N}.csv")
+    df_gaps.to_csv(output_csv, index=False)
+    print(f"   Saved {len(df_gaps)} graphs to {output_csv}")
+
+    return output_csv
 
 
 def run_monotonic_filter(input_csv: str, output_dir: str) -> str:
@@ -421,6 +492,12 @@ def main():
     print(f"   Skip QAOA:    {args.skip_qaoa}")
     print(f"   Skip Filter:  {args.skip_filter}")
     print(f"   Skip Plots:   {args.skip_plots}")
+
+    # If using random graph source, generate graphs first
+    if args.graph_source == 'random' and not args.skip_qaoa:
+        input_csv = run_random_graph_spectral_analysis(args)
+        args.input = input_csv
+        print(f"   Using generated input: {input_csv}")
 
     # Validate input
     if not os.path.exists(args.input) and not args.skip_qaoa:
