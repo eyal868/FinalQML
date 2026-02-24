@@ -32,7 +32,7 @@ import re
 import os
 
 # Configuration defaults
-DEFAULT_INPUT = 'outputs/weighted_qaoa_pipeline/weighted_QAOA_N12_p1to5.csv'
+DEFAULT_INPUT = 'outputs/weighted_qaoa_pipeline/weighted_QAOA_N12_p10to20.csv'
 DEFAULT_OUTPUT_DIR = 'outputs/weighted_qaoa_pipeline'
 
 

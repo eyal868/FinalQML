@@ -1,8 +1,9 @@
-# Paper Context - Quick Reference
+# Paper Context and Research Documentation
 
-> **📄 Full Baseline Context**: See [`PROJECT_CONTEXT.md`](../.cursor/Context/PROJECT_CONTEXT.md) in the project root for comprehensive documentation.
+> **Consolidated reference** for the FinalQML research project. For usage instructions, see [`README.md`](../README.md).
 
-This file provides a quick reference to the current paper and its relationship to the codebase.
+**Last Updated**: February 2026
+**Repository**: https://github.com/eyal868/FinalQML
 
 ---
 
@@ -10,37 +11,56 @@ This file provides a quick reference to the current paper and its relationship t
 
 **Title**: "Numerical Analyses of The Relation Between QAOA Performance and The Minimum Spectral Gap"
 
-**Authors**: Eyal Chai-Ezra
+**Author**: Eyal Chai-Ezra
 
-**Status**: Active research project - currently being expanded
+**Status**: Active research project — currently being expanded
 
-**PDF Location**: `This_Project_Paper_QAOA_spectral_gap.pdf`
+**Research Question**: Does the QAOA circuit depth (p) depend on the minimum spectral gap (g_min) in the same way that AQC runtime scales as T ∝ 1/g_min²?
 
----
-
-## Research Question
-
-Does the QAOA circuit depth (p) depend on the minimum spectral gap (g_min) in the same way that Adiabatic Quantum Computing runtime scales as T ∝ 1/g_min²?
-
-**Answer**: **No** - g_min is not a reliable predictor of QAOA performance.
+**Answer**: **No** — g_min is not a reliable predictor of QAOA performance.
 
 ---
 
-## Key Counter-Intuitive Findings
+## Key Findings
 
-1. **Negative Correlation**: Instances with smaller g_min (AQC-hard) achieve **higher** approximation ratios in QAOA
-2. **Inverted Depth**: Instances with larger g_min require **more** layers to reach target accuracy
-3. **Degeneracy Critical**: Controlling for ground state degeneracy is essential to see true relationship
-4. **Optimization Confounds**: ~45% of data filtered due to classical optimizer failures
+1. **Negative Correlation**: At fixed shallow depths (p=1–4), instances with smaller g_min (AQC-hard) achieve **higher** approximation ratios in QAOA
+2. **Inverted Depth**: Instances with larger g_min require **more** layers to reach target accuracy — opposite of AQC expectation
+3. **Degeneracy Critical**: Without controlling for ground state degeneracy, positive correlations appear; with control, the true negative/absent correlation is revealed
+4. **Optimization Confounds**: ~45% of data filtered due to classical optimizer failures (COBYLA at high p)
+5. **No Simple AQC→QAOA Translation**: QAOA's variational nature and diabatic effects allow circumventing small gaps
 
 ---
 
 ## Current Datasets
 
-- **N=10**: 19 graphs, 3-regular (analyzed)
-- **N=12**: 85 graphs, 3-regular (analyzed)
+| Size | Degree | Count | Status |
+|------|--------|-------|--------|
+| N=10 | 3-regular | 19 | Fully analyzed |
+| N=12 | 3-regular | 85 | Fully analyzed, degeneracy subsets (k=2: 31, k=4: 26) |
+| N=14 | 3-regular | ~500+ | Spectral gaps computed (sparse), QAOA feasible (~1–2hrs parallel) |
+| N=16 | 3-regular | 100 (uniform-sampled) | Spectral gaps computed |
+| Weighted | N=12 | partial | Weighted Max-Cut partially implemented |
+
 - **Circuit depths**: p = 1 to 10
-- **Degeneracy subsets**: k=2 (31 graphs), k=4 (26 graphs)
+- **Optimizer**: COBYLA, max 500 iterations, statevector simulator (noiseless)
+- **Random seed**: 42
+
+---
+
+## Paper Structure Index
+
+| Section | Topic | Key Details |
+|---------|-------|-------------|
+| 1.1 | MaxCut Problem | NP-hard, Goemans-Williamson 0.878 bound |
+| 1.2 | Adiabatic Quantum Computing | Adiabatic theorem, H(s) evolution, gap dependency |
+| 1.3 | QAOA | Ansatz structure, Suzuki-Trotter equivalence to AQC |
+| 2 | Research Questions | Q1: g_min vs ratio at fixed p; Q2: g_min vs p* at fixed ratio |
+| 3.1 | Graph Selection & Gap Calc | GENREG 3-regular graphs, M-point sampling |
+| 3.2 | QAOA Implementation | p=1–10, COBYLA, statevector, approx ratio = ⟨H_C⟩/C_max |
+| 4.1 | Depth Sweep Results | Monotonicity filter, negative correlation at k=2 |
+| 4.2 | Critical Depth (p*) | Positive correlation: larger g_min → larger p* |
+| 5 | Conclusions | g_min is **not** a reliable predictor |
+| 6 | Future Work | Generalizability, precision, optimization improvements |
 
 ---
 
@@ -50,50 +70,102 @@ Does the QAOA circuit depth (p) depend on the minimum spectral gap (g_min) in th
 
 | Paper Section | Script | Key Config |
 |---------------|--------|------------|
-| Section 3.1.2 (g_min calculation) | `spectral_gap_analysis.py` | M=200 (N=10), M=20 (N=12) |
-| Section 3.2 (QAOA analysis) | `qaoa_analysis.py` | p=1-10, COBYLA, 500 iters |
+| Section 3.1.2 (g_min calculation) | `spectral_gap_analysis.py` | Sparse Lanczos + Brent optimization |
+| Section 3.2 (QAOA analysis) | `qaoa_analysis.py` | p=1–10, COBYLA, 500 iters, parallel |
 | Section 4.1 (filtering) | `filter_qaoa_monotonic.py` | Monotonicity filter |
 | Section 4.1 (depth sweep) | `plot_p_sweep_ratio_vs_gap.py` | Multi-panel correlations |
-| Section 4.2 (critical depth) | `plot_p_star_vs_gap.py` | Thresholds 0.75-0.95 |
+| Section 4.2 (critical depth) | `plot_p_star_vs_gap.py` | Thresholds 0.75–0.95 |
 
 ### Figure Generation
 
-| Figure in Paper | Script | Output File |
-|-----------------|--------|-------------|
-| Figure: Energy Spectrum Graph 18 | `plot_example_spectrum.py` | `example_full_spectrum_N12_graph18.pdf` |
-| Figure: Gap vs Degeneracy | `plot_delta_vs_degeneracy.py` | `Delta_min_3_regular_N12_res20_delta_vs_degeneracy.pdf` |
-| Figure: Main Result (k=2) | `plot_p_sweep_ratio_vs_gap.py` | `p_sweep_ratio_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
-| Figure: p* Analysis | `plot_p_star_vs_gap.py` | `p_star_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
-| Figure: Optimization Failures | `plot_optimization_failure_examples.py` | `optimization_failure_examples.png` |
+| Figure | Script | Output File |
+|--------|--------|-------------|
+| Energy Spectrum Graph 18 | `plot_example_spectrum.py` | `example_full_spectrum_N12_graph18.pdf` |
+| Gap vs Degeneracy | `plot_delta_vs_degeneracy.py` | `Delta_min_3_regular_N12_res20_delta_vs_degeneracy.pdf` |
+| Main Result (k=2) | `plot_p_sweep_ratio_vs_gap.py` | `p_sweep_ratio_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
+| p* Analysis | `plot_p_star_vs_gap.py` | `p_star_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
+| Optimization Failures | `plot_optimization_failure_examples.py` | `optimization_failure_examples.png` |
 
 ---
 
-## Expansion Directions (Section 6)
+## Development Timeline
 
-### From Paper's Future Work
+### Phase 1: Optimization Improvements (Nov 25 – Dec 10, 2025)
 
-1. **Generalizability**: Extend to Vertex Cover, SAT, Number Partitioning
-2. **Precision**: Adaptive/binary search for g_min calculation
-3. **Optimization**: Warm-start, multi-start, basin-hopping methods
+Branch: `Optimization-Improvments` (merged via PR #1)
 
-### Technical Extensions
+- Implemented **heuristic initialization**, **warm-start** (reuse p-1 params for p), and **multi-start** (3 attempts at p≥7)
+- Improved data retention from **53% to 76%** (the ~45% filter-out rate was a major confound)
+- Heuristic init: γ ∈ [0.1, π/4], β ∈ [0.1, π/2]
+- Multi-start: 3 attempts at p≥7, early stop if ratio ≥ 0.95
 
-- **Larger N**: 14, 16, 18+ (computational challenge)
-- **More graphs**: 4-regular, 5-regular (data exists, not yet analyzed)
-- **Higher p**: >10 layers (optimization difficulty increases)
-- **Noise models**: NISQ-relevant analysis
+### Phase 2: Sparse Methods and Parallel Processing (Dec 27, 2025 – Jan 3, 2026)
+
+Branch: `improving-gap-computation` (merged via PR #2)
+
+- Refactored `aqc_spectral_utils.py` to use **sparse Hamiltonians** (Lanczos/eigsh) — O(N × 2^N) memory vs O(4^N) for dense
+- Added **parallel processing** via `multiprocessing.Pool` — 8–14x speedup on M3 Max
+- Created unified pipeline runner `run_qaoa_pipeline.py` with CLI args
+- Added SCD binary parser for GENREG graph files
+- Enabled N=14 (~1–2hrs) and N=16 analysis
+
+### Phase 3: Weighted Graphs and Current Work (Jan 4–6, 2026)
+
+Branch: `cleaning-up-old-gap-method` (not yet merged)
+
+- Added **weighted Max-Cut** support: `compute_weighted_optimal_cut()`, weighted sparse Hamiltonians
+- New scripts: `weighted_gap_analysis.py`, `plot_weighted_spectrum.py`
+- Created `sample_delta_uniform.py` to uniformly sample 100 N=16 graphs across gap bins
+
+---
+
+## Optimization Improvements — Key Results
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Valid data points | 165/310 (53.2%) | 236/310 (76.1%) | **+22.9%** |
+| Filtered out | 145/310 (46.8%) | 74/310 (23.9%) | **-22.9%** |
+
+Performance by depth at high p (with warm-start + multi-start):
+
+| p | Valid/Total | Mean Ratio | ≥0.90 | ≥0.95 |
+|---|-------------|------------|-------|-------|
+| 7 | 24/31 | 0.9152 | 67.7% | 3.2% |
+| 8 | 23/31 | 0.9233 | 64.5% | 9.7% |
+| 9 | 22/31 | 0.9324 | 64.5% | 9.7% |
+| 10 | 15/31 | 0.9381 | 45.2% | 12.9% |
+
+---
+
+## Expansion Roadmap
+
+### Completed
+
+- [x] Sparse eigensolvers with Brent's optimization (Phase 2)
+- [x] Warm-start, multi-start, heuristic initialization (Phase 1)
+- [x] Parallel processing — multiprocessing.Pool (Phase 2)
+- [x] N=14 and N=16 spectral gap computation (Phase 2)
+- [x] Weighted Max-Cut Hamiltonians (Phase 3)
+
+### In Progress / Planned
+
+- [ ] Run QAOA p-sweeps on N=14 and N=16 datasets
+- [ ] Finish weighted Max-Cut pipeline integration
+- [ ] Benchmark advanced optimizers (SPSA, L-BFGS-B, basin-hopping) vs COBYLA
+- [ ] Non-regular graphs (Erdős-Rényi, power-law, real-world networks)
+- [ ] Noise model analysis (depolarizing channels, IBM hardware specs)
+- [ ] Extend to other combinatorial problems (Vertex Cover, SAT, Number Partitioning)
+- [ ] Statistical rigor: bootstrap CIs, Spearman rank correlation, effect sizes
 
 ---
 
 ## Critical Development Rules
 
-### ⚠️ Always Remember
-
-1. **Control for degeneracy** - analyze k=2, k=4 separately
-2. **Apply monotonicity filter** - remove optimization artifacts
-3. **Document all parameters** - in CSV filenames and metadata
-4. **Generate both formats** - PNG for paper, keep CSV source
-5. **This is active research** - we're expanding, not just maintaining
+1. **Control for degeneracy** — analyze k=2, k=4 separately
+2. **Apply monotonicity filter** — remove optimization artifacts
+3. **Document all parameters** — in CSV filenames and metadata
+4. **Reproducibility** — fixed seed (42), version-controlled configs
+5. **Publication-quality figures** — 300 DPI, statistics shown (r, p-value, n)
 
 ### Data Quality Checklist
 
@@ -105,16 +177,12 @@ Does the QAOA circuit depth (p) depend on the minimum spectral gap (g_min) in th
 
 ---
 
-## Quick Links
+## External Resources
 
-- **Full Context**: [`PROJECT_CONTEXT.md`](../.cursor/Context/PROJECT_CONTEXT.md)
-- **User Guide**: [`README.md`](../README.md)
-- **Optimization Deep Dive**: [`QAOA_OPTIMIZATION_CHALLENGES.md`](../QAOA_OPTIMIZATION_CHALLENGES.md)
+- **GENREG Database**: https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html
 - **Repository**: https://github.com/eyal868/FinalQML
+- **Qiskit Documentation**: https://qiskit.org/documentation/
 
----
-
-**Last Updated**: November 25, 2025
 
 
 

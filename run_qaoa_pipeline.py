@@ -22,11 +22,18 @@ import argparse
 import os
 import sys
 import time
+import re
+import ast
 from pathlib import Path
+from typing import List, Tuple, Dict
 
 # Import standalone plotting modules
 from plot_p_sweep_ratio_vs_gap import plot_ratio_vs_gap
 from plot_p_star_vs_gap import plot_p_star_vs_gap
+
+# Import for weighted graph support
+from aqc_spectral_utils import load_graphs_from_file, compute_weighted_optimal_cut
+from qaoa_analysis import run_qaoa_single_quiet
 
 # =========================================================================
 # CONFIGURATION DEFAULTS
@@ -110,19 +117,129 @@ Examples:
 
 
 # =========================================================================
+# WEIGHT PARSING (for weighted graph support)
+# =========================================================================
+
+def parse_weights_from_string(weights_str: str) -> List[float]:
+    """
+    Parse weights from CSV string representation.
+    
+    Handles format like: "[np.float64(1.23), np.float64(4.56), ...]"
+    or simple list format: "[1.23, 4.56, ...]"
+    
+    Args:
+        weights_str: String representation of weights list
+        
+    Returns:
+        List of float weights
+    """
+    # Extract all numbers using regex for np.float64 format
+    pattern = r'np\.float64\(([\d.]+)\)'
+    matches = re.findall(pattern, weights_str)
+    
+    if matches:
+        return [float(x) for x in matches]
+    
+    # Fallback: try ast.literal_eval for simple lists
+    try:
+        return list(ast.literal_eval(weights_str))
+    except:
+        raise ValueError(f"Could not parse weights: {weights_str[:100]}...")
+
+
+def analyze_weighted_graph(
+    edges: List[Tuple[int, int]],
+    weights: List[float],
+    n_qubits: int,
+    p_values: List[int],
+    max_iter: int
+) -> Dict:
+    """
+    Run full QAOA p-sweep on a weighted graph instance.
+    
+    Args:
+        edges: Graph edges
+        weights: Edge weights
+        n_qubits: Number of qubits
+        p_values: List of QAOA depths to test
+        max_iter: Max optimizer iterations
+        
+    Returns:
+        Dictionary with results for all p values
+    """
+    # Compute weighted optimal cut for approximation ratio
+    optimal_cut, best_bitstring = compute_weighted_optimal_cut(edges, weights, n_qubits)
+    
+    results = {
+        'optimal_cut': optimal_cut,
+        'optimal_bitstring': best_bitstring,
+    }
+    
+    for p in p_values:
+        try:
+            # Run QAOA with weights
+            qaoa_result = run_qaoa_single_quiet(
+                edges=edges,
+                n_qubits=n_qubits,
+                p=p,
+                max_iter=max_iter,
+                weights=weights
+            )
+            
+            expected_cut = qaoa_result['expected_cut']
+            approx_ratio = expected_cut / optimal_cut if optimal_cut > 0 else 0
+            
+            results[f'p{p}_expected_cut'] = expected_cut
+            results[f'p{p}_approx_ratio'] = approx_ratio
+            results[f'p{p}_best_bitstring'] = qaoa_result['best_bitstring']
+            results[f'p{p}_best_cut'] = qaoa_result['best_cut_value']
+            results[f'p{p}_iterations'] = qaoa_result['num_iterations']
+            
+        except Exception as e:
+            print(f"      Error at p={p}: {e}")
+            results[f'p{p}_expected_cut'] = -1
+            results[f'p{p}_approx_ratio'] = -1
+            results[f'p{p}_best_bitstring'] = ""
+            results[f'p{p}_best_cut'] = -1
+            results[f'p{p}_iterations'] = -1
+    
+    return results
+
+
+# =========================================================================
+# MODE DETECTION
+# =========================================================================
+
+def detect_input_mode(input_csv: str) -> Tuple[str, str]:
+    """
+    Auto-detect whether input is weighted or unweighted based on columns.
+    
+    Returns:
+        Tuple of (mode, gap_column) where mode is 'weighted' or 'unweighted'
+    """
+    import pandas as pd
+    df = pd.read_csv(input_csv, nrows=5)  # Just read header + few rows
+    
+    if 'Weights' in df.columns and 'Trial' in df.columns:
+        return 'weighted', 'Weighted_Delta_min'
+    else:
+        return 'unweighted', 'Delta_min'
+
+
+# =========================================================================
 # PIPELINE STEPS
 # =========================================================================
 
-def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
-                      p_values: list, max_iter: int, num_shots: int,
-                      use_parallel: bool = True, num_workers: int = None) -> str:
+def run_qaoa_analysis_unweighted(input_csv: str, output_dir: str, degeneracy: int,
+                                  p_values: list, max_iter: int, num_shots: int,
+                                  use_parallel: bool = True, num_workers: int = None) -> str:
     """
-    Step 1: Run QAOA p-sweep analysis on graphs.
+    Step 1: Run QAOA p-sweep analysis on UNWEIGHTED graphs.
     
     Returns: Path to output CSV file
     """
     print("\n" + "=" * 70)
-    print("  STEP 1: QAOA P-SWEEP ANALYSIS")
+    print("  STEP 1: QAOA P-SWEEP ANALYSIS (UNWEIGHTED)")
     print("=" * 70)
     
     # Import the analysis module
@@ -138,9 +255,6 @@ def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
     qa.NUM_WORKERS = num_workers
     
     # Generate output filename
-    input_path = Path(input_csv)
-    
-    # Extract N from input filename or data
     import pandas as pd
     df_temp = pd.read_csv(input_csv)
     N_value = df_temp['N'].iloc[0]
@@ -156,6 +270,121 @@ def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
     
     # Run analysis
     qa.analyze_graphs_from_csv(input_csv)
+    
+    return output_path
+
+
+def run_qaoa_analysis_weighted(input_csv: str, output_dir: str, 
+                                p_values: list, max_iter: int,
+                                graph_file: str = None) -> str:
+    """
+    Step 1: Run QAOA p-sweep analysis on WEIGHTED graphs.
+    
+    Processes weighted graph data from weighted_gap_analysis.py output.
+    
+    Returns: Path to output CSV file
+    """
+    import pandas as pd
+    
+    print("\n" + "=" * 70)
+    print("  STEP 1: QAOA P-SWEEP ANALYSIS (WEIGHTED)")
+    print("=" * 70)
+    
+    # Load input data
+    df_input = pd.read_csv(input_csv)
+    
+    # Extract N - try column first, then infer from filename
+    if 'N' in df_input.columns:
+        N_value = int(df_input['N'].iloc[0])
+    else:
+        # Try to extract from filename (e.g., weighted_gap_analysis_N12.csv)
+        import re
+        match = re.search(r'N(\d+)', input_csv)
+        if match:
+            N_value = int(match.group(1))
+        else:
+            raise ValueError(f"Cannot determine N from input. Add 'N' column or use filename like 'xyz_N12.csv'")
+    
+    print(f"   Found {len(df_input)} weighted trials")
+    print(f"   N = {N_value}")
+    print(f"   p values: {min(p_values)} to {max(p_values)}")
+    
+    # Detect graph file from input or use default
+    if graph_file is None:
+        # Try to infer from N value
+        graph_file = f'graphs_rawdata/{N_value}_3_3.scd'
+    
+    print(f"   Graph file: {graph_file}")
+    
+    # Load graph data
+    all_graphs = load_graphs_from_file(graph_file)
+    print(f"   Loaded {len(all_graphs)} graphs")
+    
+    # Process each trial
+    results_list = []
+    total_trials = len(df_input)
+    
+    print(f"\n   Processing {total_trials} trials...")
+    
+    for idx, (_, row) in enumerate(df_input.iterrows()):
+        graph_id = int(row['Graph_ID'])
+        trial = int(row.get('Trial', 1))
+        
+        # Parse weights
+        try:
+            weights = parse_weights_from_string(row['Weights'])
+        except Exception as e:
+            print(f"   ❌ Failed to parse weights for Graph {graph_id} Trial {trial}: {e}")
+            continue
+        
+        # Get edges (Graph_ID is 1-indexed)
+        edges = all_graphs[graph_id - 1]
+        
+        if (idx + 1) % 10 == 0 or idx == 0:
+            print(f"   [{idx+1}/{total_trials}] Graph {graph_id}, Trial {trial}")
+        
+        # Run QAOA analysis
+        qaoa_results = analyze_weighted_graph(
+            edges=edges,
+            weights=weights,
+            n_qubits=N_value,
+            p_values=p_values,
+            max_iter=max_iter
+        )
+        
+        # Compile results
+        result_row = {
+            'Graph_ID': graph_id,
+            'Trial': trial,
+            'Original_Delta_min': row.get('Original_Delta_min', None),
+            'Weighted_Delta_min': row['Weighted_Delta_min'],
+            'Gap_Change_Percent': row.get('Gap_Change_Percent', None),
+            'Optimal_Weighted_Cut': qaoa_results['optimal_cut'],
+            'N': N_value,
+        }
+        
+        # Add per-p results
+        for p in p_values:
+            result_row[f'p{p}_approx_ratio'] = qaoa_results[f'p{p}_approx_ratio']
+            result_row[f'p{p}_expected_cut'] = qaoa_results[f'p{p}_expected_cut']
+            result_row[f'p{p}_iterations'] = qaoa_results[f'p{p}_iterations']
+        
+        # Add weights as string for reference
+        result_row['Weights'] = str(weights)
+        
+        results_list.append(result_row)
+    
+    # Create results DataFrame
+    df_results = pd.DataFrame(results_list)
+    
+    # Generate output filename
+    p_range = f"_p{min(p_values)}to{max(p_values)}"
+    output_filename = f"weighted_QAOA_N{N_value}{p_range}.csv"
+    output_path = os.path.join(output_dir, output_filename)
+    
+    df_results.to_csv(output_path, index=False)
+    print(f"\n   ✅ Results saved: {output_path}")
+    print(f"   Processed {len(df_results)} trials successfully")
     
     return output_path
 
@@ -219,6 +448,14 @@ def main():
         print(f"\n❌ ERROR: Input file not found: {args.input}")
         sys.exit(1)
     
+    # Auto-detect input mode
+    if not args.skip_qaoa:
+        mode, gap_col = detect_input_mode(args.input)
+        print(f"   Mode:         {mode.upper()} (auto-detected)")
+        print(f"   Gap column:   {gap_col}")
+    else:
+        mode = 'unknown'  # Will be detected from results file if needed
+    
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"\n📁 Output directory: {args.output_dir}")
@@ -235,18 +472,27 @@ def main():
             sys.exit(1)
         print(f"\n⏭️  Skipping QAOA analysis, using: {qaoa_output}")
     else:
-        # Step 1: Run QAOA analysis
+        # Step 1: Run QAOA analysis (mode-dependent)
         p_values = list(range(args.p_min, args.p_max + 1))
-        qaoa_output = run_qaoa_analysis(
-            input_csv=args.input,
-            output_dir=args.output_dir,
-            degeneracy=args.degeneracy,
-            p_values=p_values,
-            max_iter=args.max_iter,
-            num_shots=args.shots,
-            use_parallel=use_parallel,
-            num_workers=num_workers
-        )
+        
+        if mode == 'weighted':
+            qaoa_output = run_qaoa_analysis_weighted(
+                input_csv=args.input,
+                output_dir=args.output_dir,
+                p_values=p_values,
+                max_iter=args.max_iter
+            )
+        else:
+            qaoa_output = run_qaoa_analysis_unweighted(
+                input_csv=args.input,
+                output_dir=args.output_dir,
+                degeneracy=args.degeneracy,
+                p_values=p_values,
+                max_iter=args.max_iter,
+                num_shots=args.shots,
+                use_parallel=use_parallel,
+                num_workers=num_workers
+            )
     
     # Step 2: Monotonic filtering
     if args.skip_filter:

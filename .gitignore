@@ -3,6 +3,10 @@ outputs/*.csv
 outputs/*.png
 outputs/*.npy
 outputs/*.txt
+outputs/pipeline_*/
+outputs/test_*/
+outputs/weighted_*/
+outputs/results/
 
 # Python
 __pycache__/

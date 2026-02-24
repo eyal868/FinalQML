@@ -62,6 +62,20 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
     # Extract N for output filename
     N_value = df['N'].iloc[0]
     
+    # Auto-detect gap column (supports both unweighted and weighted results)
+    if 'Delta_min' in df.columns:
+        gap_col = 'Delta_min'
+        gap_label = 'Spectral Gap (Δ_min)'
+    elif 'Weighted_Delta_min' in df.columns:
+        gap_col = 'Weighted_Delta_min'
+        gap_label = 'Weighted Spectral Gap (Δ_min)'
+    else:
+        print(f"\n❌ ERROR: No gap column found in {input_csv}")
+        print(f"   Expected 'Delta_min' or 'Weighted_Delta_min'")
+        return None
+    
+    print(f"   Using gap column: {gap_col}")
+    
     # Auto-detect available p values from column names
     ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
     
@@ -111,9 +125,9 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
     colors = ['#e74c3c', '#9b59b6', '#f39c12', '#2ecc71', '#3498db']
     markers = ['o', 's', '^', 'D', 'v']
     
-    # Plot p* vs Δ_min for each threshold
+    # Plot p* vs spectral gap for each threshold
     for i, threshold in enumerate(thresholds):
-        x = df['Delta_min'].values
+        x = df[gap_col].values
         y = np.array(p_star_data[threshold])
         
         # Separate reached and not-reached
@@ -148,7 +162,7 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
               linewidth=2, label='Not Reached')
     
     # Formatting
-    ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=14, fontweight='bold')
+    ax.set_xlabel(gap_label, fontsize=14, fontweight='bold')
     ax.set_ylabel('Minimum p Required (p*)', fontsize=14, fontweight='bold')
     ax.set_title(f'Minimum QAOA Depth vs Spectral Gap (N={N_value})',
                  fontsize=16, fontweight='bold', pad=20)
