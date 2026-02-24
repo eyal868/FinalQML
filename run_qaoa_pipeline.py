@@ -123,31 +123,7 @@ Examples:
 # WEIGHT PARSING (for weighted graph support)
 # =========================================================================
 
-def parse_weights_from_string(weights_str: str) -> List[float]:
-    """
-    Parse weights from CSV string representation.
-
-    Handles format like: "[np.float64(1.23), np.float64(4.56), ...]"
-    or simple list format: "[1.23, 4.56, ...]"
-
-    Args:
-        weights_str: String representation of weights list
-
-    Returns:
-        List of float weights
-    """
-    # Extract all numbers using regex for np.float64 format
-    pattern = r'np\.float64\(([\d.]+)\)'
-    matches = re.findall(pattern, weights_str)
-
-    if matches:
-        return [float(x) for x in matches]
-
-    # Fallback: try ast.literal_eval for simple lists
-    try:
-        return list(ast.literal_eval(weights_str))
-    except:
-        raise ValueError(f"Could not parse weights: {weights_str[:100]}...")
+from qaoa_utils import parse_weights_string as parse_weights_from_string
 
 
 def analyze_weighted_graph(

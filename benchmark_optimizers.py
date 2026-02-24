@@ -27,6 +27,7 @@ from qiskit_aer import AerSimulator
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_analysis import edges_to_cost_hamiltonian, evaluate_cut_value, calculate_expected_cut
 
 # =========================================================================
 # CONFIGURATION
@@ -39,31 +40,6 @@ DEFAULT_MAX_ITER = 500
 NUM_SHOTS = 10000
 SIMULATOR_METHOD = 'statevector'
 RANDOM_SEED = 42
-
-# =========================================================================
-# QAOA CORE (self-contained, adapted from qaoa_analysis.py)
-# =========================================================================
-
-def edges_to_cost_hamiltonian(edges, n_qubits):
-    """Build Max-Cut cost Hamiltonian as SparsePauliOp."""
-    pauli_list = []
-    for u, v in edges:
-        pauli_str = ['I'] * n_qubits
-        pauli_str[u] = 'Z'
-        pauli_str[v] = 'Z'
-        pauli_list.append((''.join(pauli_str[::-1]), 1.0))
-    return SparsePauliOp.from_list(pauli_list)
-
-
-def evaluate_cut_value(bitstring, edges):
-    """Evaluate cut value for a bitstring."""
-    return sum(1 for u, v in edges if bitstring[u] != bitstring[v])
-
-
-def calculate_expected_cut(counts, edges):
-    """Calculate expected cut value from measurement counts."""
-    total = sum(counts.values())
-    return sum((c / total) * evaluate_cut_value(bs, edges) for bs, c in counts.items())
 
 
 def build_qaoa_cost_fn(edges, n_qubits, p, seed):

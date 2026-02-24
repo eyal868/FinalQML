@@ -23,18 +23,12 @@ import re
 import os
 
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_utils import detect_p_values
 
 # Configuration
 N10_INPUT = 'outputs/qaoa_unweighted/N10/qaoa_sweep_N10_p1to10.csv'
 N12_INPUT = 'outputs/qaoa_unweighted/N12/qaoa_sweep_N12_p1to10.csv'
 OUTPUT_FILE = 'outputs/figures/optimization_failure_examples.png'
-
-def detect_p_values(df):
-    """Auto-detect available p values from column names."""
-    ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
-    p_values = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1))
-                       for col in ratio_cols])
-    return p_values
 
 def analyze_graph_drops(df, graph_idx, p_values):
     """

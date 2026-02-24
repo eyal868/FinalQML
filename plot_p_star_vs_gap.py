@@ -28,6 +28,7 @@ import re
 import os
 
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_utils import detect_p_values, detect_gap_column
 
 # Configuration defaults
 DEFAULT_INPUT = 'outputs/qaoa_unweighted/N12/qaoa_sweep_N12_p1to10_deg4_filtered.csv'
@@ -65,13 +66,8 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
     N_value = df['N'].iloc[0]
 
     # Auto-detect gap column (supports both unweighted and weighted results)
-    if 'Delta_min' in df.columns:
-        gap_col = 'Delta_min'
-        gap_label = 'Spectral Gap (Δ_min)'
-    elif 'Weighted_Delta_min' in df.columns:
-        gap_col = 'Weighted_Delta_min'
-        gap_label = 'Weighted Spectral Gap (Δ_min)'
-    else:
+    gap_col, gap_label = detect_gap_column(df)
+    if gap_col is None:
         print(f"\n❌ ERROR: No gap column found in {input_csv}")
         print(f"   Expected 'Delta_min' or 'Weighted_Delta_min'")
         return None
@@ -79,14 +75,11 @@ def plot_p_star_vs_gap(input_csv: str, output_dir: str = None,
     print(f"   Using gap column: {gap_col}")
 
     # Auto-detect available p values from column names
-    ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
+    P_VALUES = detect_p_values(df)
 
-    if not ratio_cols:
+    if not P_VALUES:
         print(f"❌ ERROR: No approx_ratio columns found in {input_csv}")
         return None
-
-    P_VALUES = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1))
-                       for col in ratio_cols])
     max_p = max(P_VALUES)
     min_p = min(P_VALUES)
 

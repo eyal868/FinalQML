@@ -17,6 +17,7 @@ Uses sparse eigensolvers (Lanczos) with Brent's scalar optimization.
 import numpy as np
 import pandas as pd
 import time
+import os
 from typing import Optional
 from multiprocessing import Process, Queue
 
@@ -275,7 +276,6 @@ def main():
         print(f"\n📊 Sorting and saving data...")
         df = pd.DataFrame(data)
         df = df.sort_values(['N', 'Delta_min'], ascending=[True, True])
-        import os
         os.makedirs(os.path.dirname(OUTPUT_FILENAME), exist_ok=True)
         df.to_csv(OUTPUT_FILENAME, index=False)
         print(f"💾 Saved to {OUTPUT_FILENAME}")

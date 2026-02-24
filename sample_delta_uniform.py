@@ -8,6 +8,7 @@ Ensures graphs 744 and 3571 are included as edge cases.
 
 import pandas as pd
 import numpy as np
+import os
 
 from output_config import get_run_dirs, save_file, save_run_info
 
@@ -88,7 +89,6 @@ elif len(result) < 100:
 result = result.sort_values('Delta_min').reset_index(drop=True)
 
 # Save output
-import os
 output_dir = 'outputs/spectral_gap'
 os.makedirs(output_dir, exist_ok=True)
 output_path = os.path.join(output_dir, 'spectral_gap_3reg_N16_uniform100.csv')

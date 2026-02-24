@@ -10,6 +10,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import pandas as pd
 import ast
+import os
 
 # Import shared AQC utilities
 from aqc_spectral_utils import (
@@ -21,6 +22,7 @@ from aqc_spectral_utils import (
 )
 
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_utils import load_graph_from_csv
 
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different graphs
@@ -30,33 +32,6 @@ GRAPH_ID = 18  # Which graph from the CSV to visualize
 S_RESOLUTION = 100  # Number of points for s interpolation
 MAX_EIGENVALUES_TO_PLOT = 6  # Show only first N eigenvalues (None for all)
 # ============================================================================
-
-def load_graph_from_csv(csv_filename, graph_id):
-    """
-    Load graph data from CSV file by graph ID.
-
-    Returns:
-        dict with keys: 'N', 'edges', 'Delta_min', 's_at_min', 'Max_degeneracy', 'Max_cut_value'
-    """
-    df = pd.read_csv(csv_filename)
-    row = df[df['Graph_ID'] == graph_id]
-
-    if len(row) == 0:
-        raise ValueError(f"Graph ID {graph_id} not found in {csv_filename}")
-
-    row = row.iloc[0]
-
-    # Parse edges string (stored as Python list literal)
-    edges = ast.literal_eval(row['Edges'])
-
-    return {
-        'N': int(row['N']),
-        'edges': edges,
-        'Delta_min': float(row['Delta_min']),
-        's_at_min': float(row['s_at_min']),
-        'Max_degeneracy': int(row['Max_degeneracy']),
-        'Max_cut_value': int(row['Max_cut_value'])
-    }
 
 print("="*70)
 print("  FULL SPECTRUM EVOLUTION - AQC MaxCut Solution")
@@ -186,7 +161,6 @@ ax.legend(fontsize=12, loc='best')
 ax.set_xlim(0, 1)
 
 plt.tight_layout()
-import os
 os.makedirs('outputs/figures', exist_ok=True)
 filename = f"outputs/figures/spectrum_N{N}_graph{GRAPH_ID}.png"
 plt.savefig(filename, dpi=200, bbox_inches='tight')

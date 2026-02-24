@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import ast
 import re
+import os
 
 from aqc_spectral_utils import (
     build_H_initial_sparse,
@@ -28,6 +29,7 @@ from scipy.linalg import eigh
 from scipy.sparse.linalg import eigsh
 
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_utils import parse_weights_string
 
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different trials
@@ -40,17 +42,6 @@ N = 12              # Number of qubits
 S_RESOLUTION = 100  # Number of points for s interpolation
 MAX_EIGENVALUES_TO_PLOT = 20  # Show only first N eigenvalues
 # ============================================================================
-
-
-def parse_weights_string(weights_str: str) -> list:
-    """
-    Parse weights string from CSV which contains np.float64() wrappers.
-    Example: "[np.float64(0.534), np.float64(1.993), ...]"
-    """
-    # Extract all float values using regex
-    pattern = r'np\.float64\(([\d.e+-]+)\)'
-    matches = re.findall(pattern, weights_str)
-    return [float(m) for m in matches]
 
 
 def compute_spectrum_evolution_weighted(H_B, H_P, s_points, k_eigenvalues=None):
@@ -289,7 +280,6 @@ def main():
     plt.tight_layout()
 
     # Save figure
-    import os
     os.makedirs('outputs/figures', exist_ok=True)
     output_filename = f"outputs/figures/weighted_spectrum_graph{GRAPH_ID}_trial{TRIAL}.png"
     plt.savefig(output_filename, dpi=200, bbox_inches='tight')

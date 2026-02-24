@@ -38,6 +38,7 @@ from qaoa_analysis import (
 
 # Output management
 from output_config import get_run_dirs, save_file, save_run_info
+from qaoa_utils import load_graph_from_csv as _load_graph_from_csv
 
 # Qiskit imports
 from qiskit.circuit.library import QAOAAnsatz
@@ -102,23 +103,15 @@ def load_graph_from_csv(graph_id: int, csv_path: str = INPUT_CSV) -> Dict:
     Returns:
         Dictionary with graph properties
     """
-    df = pd.read_csv(csv_path)
-    row = df[df['Graph_ID'] == graph_id]
-
-    if len(row) == 0:
-        raise ValueError(f"Graph ID {graph_id} not found in {csv_path}")
-
-    row = row.iloc[0]
-    edges = ast.literal_eval(row['Edges'])
-
+    data = _load_graph_from_csv(csv_path, graph_id)
     return {
-        'graph_id': int(row['Graph_ID']),
-        'n_qubits': int(row['N']),
-        'edges': edges,
-        'delta_min': float(row['Delta_min']),
-        's_at_min': float(row['s_at_min']),
-        'max_degeneracy': int(row['Max_degeneracy']),
-        'optimal_cut': int(row['Max_cut_value'])
+        'graph_id': data['graph_id'],
+        'n_qubits': data['N'],
+        'edges': data['edges'],
+        'delta_min': data['Delta_min'],
+        's_at_min': data['s_at_min'],
+        'max_degeneracy': data['Max_degeneracy'],
+        'optimal_cut': data['Max_cut_value']
     }
 
 

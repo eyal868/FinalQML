@@ -17,6 +17,7 @@ This script:
 import numpy as np
 import pandas as pd
 import time
+import os
 from typing import List, Tuple
 
 from aqc_spectral_utils import (
@@ -308,7 +309,6 @@ def main():
     # Save results
     print("\n" + "-" * 70)
     df_results = pd.DataFrame(results)
-    import os
     os.makedirs(os.path.dirname(CONFIG['output_csv']), exist_ok=True)
     df_results.to_csv(CONFIG['output_csv'], index=False)
     print(f"\n💾 Results saved to {CONFIG['output_csv']}")

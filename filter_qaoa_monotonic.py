@@ -24,12 +24,7 @@ import re
 from pathlib import Path
 import glob
 
-def detect_p_values(df):
-    """Auto-detect available p values from column names."""
-    ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
-    p_values = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1))
-                       for col in ratio_cols])
-    return p_values
+from qaoa_utils import detect_p_values
 
 def apply_monotonic_filter(df, p_values, verbose=True):
     """

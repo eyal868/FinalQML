@@ -2,7 +2,7 @@
 
 > **Consolidated reference** for the FinalQML research project. For usage instructions, see [`README.md`](../README.md).
 
-**Last Updated**: February 2026
+**Last Updated**: February 24, 2026
 **Repository**: https://github.com/eyal868/FinalQML
 
 ---
@@ -26,7 +26,7 @@
 1. **Negative Correlation**: At fixed shallow depths (p=1–4), instances with smaller g_min (AQC-hard) achieve **higher** approximation ratios in QAOA
 2. **Inverted Depth**: Instances with larger g_min require **more** layers to reach target accuracy — opposite of AQC expectation
 3. **Degeneracy Critical**: Without controlling for ground state degeneracy, positive correlations appear; with control, the true negative/absent correlation is revealed
-4. **Optimization Confounds**: ~45% of data filtered due to classical optimizer failures (COBYLA at high p)
+4. **Optimization Confounds**: ~24% of data filtered after optimization improvements (down from ~45%)
 5. **No Simple AQC→QAOA Translation**: QAOA's variational nature and diabatic effects allow circumventing small gaps
 
 ---
@@ -37,12 +37,13 @@
 |------|--------|-------|--------|
 | N=10 | 3-regular | 19 | Fully analyzed |
 | N=12 | 3-regular | 85 | Fully analyzed, degeneracy subsets (k=2: 31, k=4: 26) |
-| N=14 | 3-regular | ~500+ | Spectral gaps computed (sparse), QAOA feasible (~1–2hrs parallel) |
+| N=14 | 3-regular | ~509 | Spectral gaps computed (sparse), QAOA feasible (~1–2hrs parallel) |
 | N=16 | 3-regular | 100 (uniform-sampled) | Spectral gaps computed |
 | Weighted | N=12 | partial | Weighted Max-Cut partially implemented |
 
 - **Circuit depths**: p = 1 to 10
 - **Optimizer**: COBYLA, max 500 iterations, statevector simulator (noiseless)
+- **Initialization**: Heuristic (p=1) + warm-start (p≥2) + multi-start (p≥7)
 - **Random seed**: 42
 
 ---
@@ -55,7 +56,7 @@
 | 1.2 | Adiabatic Quantum Computing | Adiabatic theorem, H(s) evolution, gap dependency |
 | 1.3 | QAOA | Ansatz structure, Suzuki-Trotter equivalence to AQC |
 | 2 | Research Questions | Q1: g_min vs ratio at fixed p; Q2: g_min vs p* at fixed ratio |
-| 3.1 | Graph Selection & Gap Calc | GENREG 3-regular graphs, M-point sampling |
+| 3.1 | Graph Selection & Gap Calc | GENREG 3-regular graphs, sparse Lanczos + Brent optimization |
 | 3.2 | QAOA Implementation | p=1–10, COBYLA, statevector, approx ratio = ⟨H_C⟩/C_max |
 | 4.1 | Depth Sweep Results | Monotonicity filter, negative correlation at k=2 |
 | 4.2 | Critical Depth (p*) | Positive correlation: larger g_min → larger p* |
@@ -78,13 +79,28 @@
 
 ### Figure Generation
 
-| Figure | Script | Output File |
-|--------|--------|-------------|
-| Energy Spectrum Graph 18 | `plot_example_spectrum.py` | `example_full_spectrum_N12_graph18.pdf` |
-| Gap vs Degeneracy | `plot_delta_vs_degeneracy.py` | `Delta_min_3_regular_N12_res20_delta_vs_degeneracy.pdf` |
-| Main Result (k=2) | `plot_p_sweep_ratio_vs_gap.py` | `p_sweep_ratio_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
-| p* Analysis | `plot_p_star_vs_gap.py` | `p_star_vs_gap_N12_p1to10_deg_2_only_filtered.png` |
-| Optimization Failures | `plot_optimization_failure_examples.py` | `optimization_failure_examples.png` |
+| Figure | Script | Output Location |
+|--------|--------|-----------------|
+| Energy Spectrum Graph 18 | `plot_example_spectrum.py` | `outputs/figures/` |
+| Gap vs Degeneracy | `plot_delta_vs_degeneracy.py` | `outputs/spectral_gap/` |
+| Main Result (k=2) | `plot_p_sweep_ratio_vs_gap.py` | `outputs/qaoa_unweighted/N12/` |
+| p* Analysis | `plot_p_star_vs_gap.py` | `outputs/qaoa_unweighted/N12/` |
+| Optimization Failures | `plot_optimization_failure_examples.py` | `outputs/figures/` |
+| Weighted Spectrum | `plot_weighted_spectrum.py` | `outputs/qaoa_weighted/` |
+
+### Figure–LaTeX Cross-Reference
+
+| LaTeX Reference | Repo File | Description |
+|-----------------|-----------|-------------|
+| `example_full_spectrum_N12_graph18.pdf` | `outputs/figures/example_full_spectrum_N12_graph18.*` | Energy eigenvalue evolution, proper gap with degeneracy |
+| `example_full_spectrum_N12_graph44.pdf` | `outputs/figures/example_full_spectrum_N12_graph44.*` | High degeneracy example (k=36) |
+| `Delta_min_3_regular_N12_res20_delta_vs_degeneracy.pdf` | `outputs/spectral_gap/spectral_gap_3reg_N12_k2_delta_vs_degeneracy.png` | g_min vs ground state degeneracy |
+| `p_sweep_ratio_vs_gap_N12_p1to10_deg_2_only_filtered.pdf` | `outputs/qaoa_unweighted/N12/p_sweep_ratio_vs_gap_*_filtered.png` | **Main Result**: negative correlation at k=2 |
+| `p_sweep_ratio_vs_gap_N12_p1to10_deg_4_only_filtered.pdf` | `outputs/qaoa_unweighted/N12/p_sweep_ratio_vs_gap_*_k4_filtered.png` | k=4: weak/absent correlation |
+| `p_star_vs_gap_N12_p1to10_deg_2_only_filtered.png` | `outputs/qaoa_unweighted/N12/p_star_vs_gap_*_filtered.png` | Critical depth analysis for k=2 |
+| `optimization_failure_examples.pdf` | `outputs/figures/optimization_failure_examples.png` | Representative optimizer failures |
+
+> **Note**: Paper references `.pdf` but repo figures are `.png` (except spectrum plots which may exist as both).
 
 ---
 
@@ -95,7 +111,7 @@
 Branch: `Optimization-Improvments` (merged via PR #1)
 
 - Implemented **heuristic initialization**, **warm-start** (reuse p-1 params for p), and **multi-start** (3 attempts at p≥7)
-- Improved data retention from **53% to 76%** (the ~45% filter-out rate was a major confound)
+- Improved data retention from **53% to 76%** (filter-out rate: 47% → 24%)
 - Heuristic init: γ ∈ [0.1, π/4], β ∈ [0.1, π/2]
 - Multi-start: 3 attempts at p≥7, early stop if ratio ≥ 0.95
 
@@ -109,24 +125,41 @@ Branch: `improving-gap-computation` (merged via PR #2)
 - Added SCD binary parser for GENREG graph files
 - Enabled N=14 (~1–2hrs) and N=16 analysis
 
-### Phase 3: Weighted Graphs and Current Work (Jan 4–6, 2026)
+### Phase 3: Weighted Graphs (Jan 4–6, 2026)
 
-Branch: `cleaning-up-old-gap-method` (not yet merged)
+Branch: `cleaning-up-old-gap-method` (merged)
 
 - Added **weighted Max-Cut** support: `compute_weighted_optimal_cut()`, weighted sparse Hamiltonians
 - New scripts: `weighted_gap_analysis.py`, `plot_weighted_spectrum.py`
 - Created `sample_delta_uniform.py` to uniformly sample 100 N=16 graphs across gap bins
 
+### Output System Refactor (Feb 2026)
+
+- Dual-save system: `outputs/` (repo) + `~/Desktop/FinalQML_Outputs/` (timestamped)
+- `output_config.py` central module
+- Merged `DataOutputs/` into `outputs/`, consistent naming scheme
+- Refactored 12 scripts
+
 ---
 
 ## Optimization Improvements — Key Results
+
+The classical optimization challenge (COBYLA getting stuck in local minima at high p) was a major confound. Three strategies were implemented in Phase 1:
+
+| Strategy | When Applied | Effect |
+|----------|-------------|--------|
+| Heuristic initialization | p=1 | γ ∈ [0.1, π/4], β ∈ [0.1, π/2] instead of random |
+| Warm-start | p≥2 | Reuse optimal params from p−1 |
+| Multi-start | p≥7 | 3 random attempts, early stop if ratio ≥ 0.95 |
+
+**Aggregate improvement:**
 
 | Metric | Before | After | Change |
 |--------|--------|-------|--------|
 | Valid data points | 165/310 (53.2%) | 236/310 (76.1%) | **+22.9%** |
 | Filtered out | 145/310 (46.8%) | 74/310 (23.9%) | **-22.9%** |
 
-Performance by depth at high p (with warm-start + multi-start):
+**Per-depth results (N=12, k=2, with warm-start + multi-start):**
 
 | p | Valid/Total | Mean Ratio | ≥0.90 | ≥0.95 |
 |---|-------------|------------|-------|-------|
@@ -134,6 +167,8 @@ Performance by depth at high p (with warm-start + multi-start):
 | 8 | 23/31 | 0.9233 | 64.5% | 9.7% |
 | 9 | 22/31 | 0.9324 | 64.5% | 9.7% |
 | 10 | 15/31 | 0.9381 | 45.2% | 12.9% |
+
+**References**: Guerreschi & Matsuura 2019 (optimization challenges), Zhou et al. 2020 (initialization strategies), Akshay et al. 2020 (parameter concentrations).
 
 ---
 
@@ -146,12 +181,13 @@ Performance by depth at high p (with warm-start + multi-start):
 - [x] Parallel processing — multiprocessing.Pool (Phase 2)
 - [x] N=14 and N=16 spectral gap computation (Phase 2)
 - [x] Weighted Max-Cut Hamiltonians (Phase 3)
+- [x] Optimizer benchmarking script — `benchmark_optimizers.py`
+- [x] Output system refactor — dual-save, consistent naming
 
 ### In Progress / Planned
 
 - [ ] Run QAOA p-sweeps on N=14 and N=16 datasets
 - [ ] Finish weighted Max-Cut pipeline integration
-- [ ] Benchmark advanced optimizers (SPSA, L-BFGS-B, basin-hopping) vs COBYLA
 - [ ] Non-regular graphs (Erdős-Rényi, power-law, real-world networks)
 - [ ] Noise model analysis (depolarizing channels, IBM hardware specs)
 - [ ] Extend to other combinatorial problems (Vertex Cover, SAT, Number Partitioning)
@@ -182,8 +218,4 @@ Performance by depth at high p (with warm-start + multi-start):
 - **GENREG Database**: https://www.mathe2.uni-bayreuth.de/markus/reggraphs.html
 - **Repository**: https://github.com/eyal868/FinalQML
 - **Qiskit Documentation**: https://qiskit.org/documentation/
-
-
-
-
 
