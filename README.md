@@ -82,7 +82,7 @@ python3 run_qaoa_pipeline.py \
 
 #### 1. Spectral Gap Analysis
 
-Compute minimum spectral gap (Δ_min) along the AQC path `H(s) = (1-s)H_mixer + s·H_problem`.
+Compute minimum spectral gap (Δ_min) along the AQC path `H(s) = (1-s)H_mixer + s·H_problem` using sparse eigensolvers (Lanczos) with Brent's optimization.
 
 **Run with default configuration:**
 ```bash
@@ -92,13 +92,13 @@ python3 spectral_gap_analysis.py
 **Configure by editing the `CONFIG` dictionary at the top of the file:**
 ```python
 CONFIG = {
-    'N_values': [10, 12],           # Graph sizes to process
-    'S_resolution': 100,             # Sampling resolution along s∈[0,1]
+    'N_values': [12],                # Graph sizes to process
     'graphs_per_N': {                # Graph selection per N
-        10: None,                    # None = all graphs
-        12: range(8, 85)            # Specific range (skips problematic graphs)
+        12: None,                    # None = all graphs
     },
-    'k_vals_check': 20,              # Eigenvalues to track (increase for high degeneracy)
+    'target_degeneracy': 2,          # Filter to graphs with this degeneracy
+    's_bounds': (0.01, 0.99),        # Optimization bounds for s
+    'xtol': 1e-4,                    # Optimization tolerance
     'output_suffix': ''              # Optional suffix for output filename
 }
 ```
@@ -318,4 +318,4 @@ FinalQML/
 
 ---
 
-**Last Updated:** January 2026
+**Last Updated:** January 3, 2026

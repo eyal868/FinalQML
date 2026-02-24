@@ -22,15 +22,26 @@ import argparse
 import os
 import sys
 import time
+import re
+import ast
 from pathlib import Path
+from typing import List, Tuple, Dict
+
+# Import standalone plotting modules
+from plot_p_sweep_ratio_vs_gap import plot_ratio_vs_gap
+from plot_p_star_vs_gap import plot_p_star_vs_gap
+
+# Import for weighted graph support
+from aqc_spectral_utils import load_graphs_from_file, compute_weighted_optimal_cut
+from qaoa_analysis import run_qaoa_single_quiet
 
 # =========================================================================
 # CONFIGURATION DEFAULTS
 # =========================================================================
 
 # Input/Output
-DEFAULT_INPUT = 'outputs/Delta_min_3_regular_N12_sparse_k2_final.csv'
-DEFAULT_OUTPUT_DIR = 'outputs/pipeline_full_N14/'
+DEFAULT_INPUT = 'outputs/weighted_gap_analysis_N12.csv'
+DEFAULT_OUTPUT_DIR = 'outputs/pipeline_full_N12_weighted/'
 
 # QAOA Parameters
 DEFAULT_DEGENERACY = None  # None = process all, int = filter to specific degeneracy
@@ -106,19 +117,129 @@ Examples:
 
 
 # =========================================================================
+# WEIGHT PARSING (for weighted graph support)
+# =========================================================================
+
+def parse_weights_from_string(weights_str: str) -> List[float]:
+    """
+    Parse weights from CSV string representation.
+    
+    Handles format like: "[np.float64(1.23), np.float64(4.56), ...]"
+    or simple list format: "[1.23, 4.56, ...]"
+    
+    Args:
+        weights_str: String representation of weights list
+        
+    Returns:
+        List of float weights
+    """
+    # Extract all numbers using regex for np.float64 format
+    pattern = r'np\.float64\(([\d.]+)\)'
+    matches = re.findall(pattern, weights_str)
+    
+    if matches:
+        return [float(x) for x in matches]
+    
+    # Fallback: try ast.literal_eval for simple lists
+    try:
+        return list(ast.literal_eval(weights_str))
+    except:
+        raise ValueError(f"Could not parse weights: {weights_str[:100]}...")
+
+
+def analyze_weighted_graph(
+    edges: List[Tuple[int, int]],
+    weights: List[float],
+    n_qubits: int,
+    p_values: List[int],
+    max_iter: int
+) -> Dict:
+    """
+    Run full QAOA p-sweep on a weighted graph instance.
+    
+    Args:
+        edges: Graph edges
+        weights: Edge weights
+        n_qubits: Number of qubits
+        p_values: List of QAOA depths to test
+        max_iter: Max optimizer iterations
+        
+    Returns:
+        Dictionary with results for all p values
+    """
+    # Compute weighted optimal cut for approximation ratio
+    optimal_cut, best_bitstring = compute_weighted_optimal_cut(edges, weights, n_qubits)
+    
+    results = {
+        'optimal_cut': optimal_cut,
+        'optimal_bitstring': best_bitstring,
+    }
+    
+    for p in p_values:
+        try:
+            # Run QAOA with weights
+            qaoa_result = run_qaoa_single_quiet(
+                edges=edges,
+                n_qubits=n_qubits,
+                p=p,
+                max_iter=max_iter,
+                weights=weights
+            )
+            
+            expected_cut = qaoa_result['expected_cut']
+            approx_ratio = expected_cut / optimal_cut if optimal_cut > 0 else 0
+            
+            results[f'p{p}_expected_cut'] = expected_cut
+            results[f'p{p}_approx_ratio'] = approx_ratio
+            results[f'p{p}_best_bitstring'] = qaoa_result['best_bitstring']
+            results[f'p{p}_best_cut'] = qaoa_result['best_cut_value']
+            results[f'p{p}_iterations'] = qaoa_result['num_iterations']
+            
+        except Exception as e:
+            print(f"      Error at p={p}: {e}")
+            results[f'p{p}_expected_cut'] = -1
+            results[f'p{p}_approx_ratio'] = -1
+            results[f'p{p}_best_bitstring'] = ""
+            results[f'p{p}_best_cut'] = -1
+            results[f'p{p}_iterations'] = -1
+    
+    return results
+
+
+# =========================================================================
+# MODE DETECTION
+# =========================================================================
+
+def detect_input_mode(input_csv: str) -> Tuple[str, str]:
+    """
+    Auto-detect whether input is weighted or unweighted based on columns.
+    
+    Returns:
+        Tuple of (mode, gap_column) where mode is 'weighted' or 'unweighted'
+    """
+    import pandas as pd
+    df = pd.read_csv(input_csv, nrows=5)  # Just read header + few rows
+    
+    if 'Weights' in df.columns and 'Trial' in df.columns:
+        return 'weighted', 'Weighted_Delta_min'
+    else:
+        return 'unweighted', 'Delta_min'
+
+
+# =========================================================================
 # PIPELINE STEPS
 # =========================================================================
 
-def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
-                      p_values: list, max_iter: int, num_shots: int,
-                      use_parallel: bool = True, num_workers: int = None) -> str:
+def run_qaoa_analysis_unweighted(input_csv: str, output_dir: str, degeneracy: int,
+                                  p_values: list, max_iter: int, num_shots: int,
+                                  use_parallel: bool = True, num_workers: int = None) -> str:
     """
-    Step 1: Run QAOA p-sweep analysis on graphs.
+    Step 1: Run QAOA p-sweep analysis on UNWEIGHTED graphs.
     
     Returns: Path to output CSV file
     """
     print("\n" + "=" * 70)
-    print("  STEP 1: QAOA P-SWEEP ANALYSIS")
+    print("  STEP 1: QAOA P-SWEEP ANALYSIS (UNWEIGHTED)")
     print("=" * 70)
     
     # Import the analysis module
@@ -134,10 +255,6 @@ def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
     qa.NUM_WORKERS = num_workers
     
     # Generate output filename
-    input_path = Path(input_csv)
-    input_stem = input_path.stem
-    
-    # Extract N from input filename or data
     import pandas as pd
     df_temp = pd.read_csv(input_csv)
     N_value = df_temp['N'].iloc[0]
@@ -157,6 +274,121 @@ def run_qaoa_analysis(input_csv: str, output_dir: str, degeneracy: int,
     return output_path
 
 
+def run_qaoa_analysis_weighted(input_csv: str, output_dir: str, 
+                                p_values: list, max_iter: int,
+                                graph_file: str = None) -> str:
+    """
+    Step 1: Run QAOA p-sweep analysis on WEIGHTED graphs.
+    
+    Processes weighted graph data from weighted_gap_analysis.py output.
+    
+    Returns: Path to output CSV file
+    """
+    import pandas as pd
+    
+    print("\n" + "=" * 70)
+    print("  STEP 1: QAOA P-SWEEP ANALYSIS (WEIGHTED)")
+    print("=" * 70)
+    
+    # Load input data
+    df_input = pd.read_csv(input_csv)
+    
+    # Extract N - try column first, then infer from filename
+    if 'N' in df_input.columns:
+        N_value = int(df_input['N'].iloc[0])
+    else:
+        # Try to extract from filename (e.g., weighted_gap_analysis_N12.csv)
+        import re
+        match = re.search(r'N(\d+)', input_csv)
+        if match:
+            N_value = int(match.group(1))
+        else:
+            raise ValueError(f"Cannot determine N from input. Add 'N' column or use filename like 'xyz_N12.csv'")
+    
+    print(f"   Found {len(df_input)} weighted trials")
+    print(f"   N = {N_value}")
+    print(f"   p values: {min(p_values)} to {max(p_values)}")
+    
+    # Detect graph file from input or use default
+    if graph_file is None:
+        # Try to infer from N value
+        graph_file = f'graphs_rawdata/{N_value}_3_3.scd'
+    
+    print(f"   Graph file: {graph_file}")
+    
+    # Load graph data
+    all_graphs = load_graphs_from_file(graph_file)
+    print(f"   Loaded {len(all_graphs)} graphs")
+    
+    # Process each trial
+    results_list = []
+    total_trials = len(df_input)
+    
+    print(f"\n   Processing {total_trials} trials...")
+    
+    for idx, (_, row) in enumerate(df_input.iterrows()):
+        graph_id = int(row['Graph_ID'])
+        trial = int(row.get('Trial', 1))
+        
+        # Parse weights
+        try:
+            weights = parse_weights_from_string(row['Weights'])
+        except Exception as e:
+            print(f"   ❌ Failed to parse weights for Graph {graph_id} Trial {trial}: {e}")
+            continue
+        
+        # Get edges (Graph_ID is 1-indexed)
+        edges = all_graphs[graph_id - 1]
+        
+        if (idx + 1) % 10 == 0 or idx == 0:
+            print(f"   [{idx+1}/{total_trials}] Graph {graph_id}, Trial {trial}")
+        
+        # Run QAOA analysis
+        qaoa_results = analyze_weighted_graph(
+            edges=edges,
+            weights=weights,
+            n_qubits=N_value,
+            p_values=p_values,
+            max_iter=max_iter
+        )
+        
+        # Compile results
+        result_row = {
+            'Graph_ID': graph_id,
+            'Trial': trial,
+            'Original_Delta_min': row.get('Original_Delta_min', None),
+            'Weighted_Delta_min': row['Weighted_Delta_min'],
+            'Gap_Change_Percent': row.get('Gap_Change_Percent', None),
+            'Optimal_Weighted_Cut': qaoa_results['optimal_cut'],
+            'N': N_value,
+        }
+        
+        # Add per-p results
+        for p in p_values:
+            result_row[f'p{p}_approx_ratio'] = qaoa_results[f'p{p}_approx_ratio']
+            result_row[f'p{p}_expected_cut'] = qaoa_results[f'p{p}_expected_cut']
+            result_row[f'p{p}_iterations'] = qaoa_results[f'p{p}_iterations']
+        
+        # Add weights as string for reference
+        result_row['Weights'] = str(weights)
+        
+        results_list.append(result_row)
+    
+    # Create results DataFrame
+    df_results = pd.DataFrame(results_list)
+    
+    # Generate output filename
+    p_range = f"_p{min(p_values)}to{max(p_values)}"
+    output_filename = f"weighted_QAOA_N{N_value}{p_range}.csv"
+    output_path = os.path.join(output_dir, output_filename)
+    
+    df_results.to_csv(output_path, index=False)
+    print(f"\n   ✅ Results saved: {output_path}")
+    print(f"   Processed {len(df_results)} trials successfully")
+    
+    return output_path
+
+
 def run_monotonic_filter(input_csv: str, output_dir: str) -> str:
     """
     Step 2: Apply monotonic filter to remove optimization artifacts.
@@ -171,7 +403,7 @@ def run_monotonic_filter(input_csv: str, output_dir: str) -> str:
     import filter_qaoa_monotonic as fqm
     
     # Process the file
-    stats = fqm.process_file(input_csv, verbose=True)
+    fqm.process_file(input_csv, verbose=True)
     
     # Determine output filename (process_file creates it automatically)
     input_path = Path(input_csv)
@@ -182,253 +414,6 @@ def run_monotonic_filter(input_csv: str, output_dir: str) -> str:
     filtered_path = input_path.parent / filtered_filename
     
     return str(filtered_path)
-
-
-def run_ratio_vs_gap_plot(input_csv: str, output_dir: str) -> str:
-    """
-    Step 3: Generate approximation ratio vs spectral gap plots.
-    
-    Returns: Path to output PNG file
-    """
-    print("\n" + "=" * 70)
-    print("  STEP 3: PLOTTING APPROXIMATION RATIO vs SPECTRAL GAP")
-    print("=" * 70)
-    
-    # Import required modules
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from scipy.stats import pearsonr
-    import re
-    
-    # Load data
-    print(f"\n📖 Loading data from: {input_csv}")
-    df = pd.read_csv(input_csv)
-    print(f"   Found {len(df)} graphs, N={df['N'].iloc[0]}")
-    
-    N_value = df['N'].iloc[0]
-    
-    # Auto-detect p values
-    ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
-    if not ratio_cols:
-        print(f"❌ ERROR: No approx_ratio columns found in {input_csv}")
-        return None
-    
-    P_VALUES = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1)) 
-                       for col in ratio_cols])
-    max_p = max(P_VALUES)
-    min_p = min(P_VALUES)
-    
-    print(f"   Detected p values: {min_p} to {max_p}")
-    
-    # Create subplot grid
-    n_plots = len(P_VALUES)
-    n_cols = min(5, n_plots)
-    n_rows = int(np.ceil(n_plots / n_cols))
-    
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
-    fig.suptitle(f'Approximation Ratio vs Spectral Gap (N={N_value})', 
-                 fontsize=16, fontweight='bold', y=0.99)
-    
-    # Handle axes flattening
-    if n_plots == 1:
-        axes_flat = [axes]
-    elif n_rows == 1 or n_cols == 1:
-        axes_flat = axes.flatten() if hasattr(axes, 'flatten') else [axes]
-    else:
-        axes_flat = axes.flatten()
-    
-    print(f"\n📊 Correlation Analysis by p:")
-    
-    # Plot each p value
-    for idx, p in enumerate(P_VALUES):
-        ax = axes_flat[idx]
-        ratio_col = f'p{p}_approx_ratio'
-        x = df['Delta_min'].values
-        y = df[ratio_col].values
-        
-        # Remove invalid values (NaN from filtering)
-        valid_mask = np.isfinite(y) & (y >= 0)
-        x_valid = x[valid_mask]
-        y_valid = y[valid_mask]
-        
-        # Scatter plot
-        ax.scatter(x_valid, y_valid, s=80, alpha=0.6, c='steelblue',
-                   edgecolors='black', linewidth=0.5)
-        
-        # Correlation and trend line
-        if len(x_valid) > 1 and np.std(y_valid) > 0:
-            corr, stat_pval = pearsonr(x_valid, y_valid)
-            z = np.polyfit(x_valid, y_valid, 1)
-            p_fit = np.poly1d(z)
-            x_trend = np.linspace(x_valid.min(), x_valid.max(), 100)
-            ax.plot(x_trend, p_fit(x_trend), "r--", alpha=0.7, linewidth=2)
-            
-            title_color = 'green' if abs(corr) > 0.5 else 'orange' if abs(corr) > 0.3 else 'black'
-            ax.set_title(f'p={p}: r={corr:+.3f}', fontsize=11, fontweight='bold', color=title_color)
-            
-            sig = '***' if stat_pval < 0.001 else '**' if stat_pval < 0.01 else '*' if stat_pval < 0.05 else ''
-            print(f"   p={p:2d}: r={corr:+.4f}, p-value={stat_pval:.4f} {sig}")
-        else:
-            ax.set_title(f'p={p}: N/A', fontsize=11)
-        
-        if idx >= (n_rows - 1) * n_cols:
-            ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=10)
-        if idx % n_cols == 0:
-            ax.set_ylabel('Approximation Ratio', fontsize=10)
-        ax.grid(True, alpha=0.3)
-        
-        if len(y_valid) > 0:
-            ax.set_ylim([max(0.5, y_valid.min() - 0.05), min(1.05, y_valid.max() + 0.05)])
-    
-    # Hide unused subplots
-    for idx in range(len(P_VALUES), len(axes_flat)):
-        axes_flat[idx].set_visible(False)
-    
-    plt.tight_layout()
-    
-    # Save figure
-    input_stem = Path(input_csv).stem
-    if input_stem.startswith("QAOA_p_sweep"):
-        output_name = input_stem.replace("QAOA_p_sweep", "ratio_vs_gap", 1)
-    else:
-        output_name = f"ratio_vs_gap_{input_stem}"
-    
-    output_path = os.path.join(output_dir, f"{output_name}.png")
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"\n✅ Figure saved: {output_path}")
-    return output_path
-
-
-def run_p_star_plot(input_csv: str, output_dir: str, thresholds: list) -> str:
-    """
-    Step 4: Generate p* (minimum depth required) vs spectral gap plots.
-    
-    Returns: Path to output PNG file
-    """
-    print("\n" + "=" * 70)
-    print("  STEP 4: PLOTTING p* (MINIMUM DEPTH) vs SPECTRAL GAP")
-    print("=" * 70)
-    
-    # Import required modules
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from scipy.stats import pearsonr, spearmanr
-    import re
-    
-    # Load data
-    print(f"\n📖 Loading data from: {input_csv}")
-    df = pd.read_csv(input_csv)
-    print(f"   Found {len(df)} graphs, N={df['N'].iloc[0]}")
-    
-    N_value = df['N'].iloc[0]
-    
-    # Auto-detect p values
-    ratio_cols = [col for col in df.columns if col.endswith('_approx_ratio')]
-    if not ratio_cols:
-        print(f"❌ ERROR: No approx_ratio columns found in {input_csv}")
-        return None
-    
-    P_VALUES = sorted([int(re.search(r'p(\d+)_approx_ratio', col).group(1)) 
-                       for col in ratio_cols])
-    max_p = max(P_VALUES)
-    
-    # Calculate p* for each threshold
-    print(f"\n🎯 Calculating p* for thresholds: {thresholds}")
-    
-    p_star_data = {}
-    for threshold in thresholds:
-        p_star_list = []
-        for idx, row in df.iterrows():
-            for p in P_VALUES:
-                ratio = row[f'p{p}_approx_ratio']
-                if pd.notna(ratio) and ratio >= threshold:
-                    p_star_list.append(p)
-                    break
-            else:
-                p_star_list.append(max_p + 1)
-        
-        p_star_data[threshold] = p_star_list
-        reached = sum(1 for ps in p_star_list if ps <= max_p)
-        mean_p = np.mean([ps for ps in p_star_list if ps <= max_p]) if reached > 0 else np.nan
-        print(f"   θ={threshold:.2f}: {reached}/{len(df)} graphs reach it" + 
-              (f", mean p*={mean_p:.2f}" if reached > 0 else ""))
-    
-    # Create plot
-    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
-    
-    colors = ['#e74c3c', '#9b59b6', '#f39c12', '#2ecc71', '#3498db']
-    markers = ['o', 's', '^', 'D', 'v']
-    
-    for i, threshold in enumerate(thresholds):
-        x = df['Delta_min'].values
-        y = np.array(p_star_data[threshold])
-        
-        reached_mask = y <= max_p
-        
-        if np.any(reached_mask):
-            ax.scatter(x[reached_mask], y[reached_mask],
-                      s=100, alpha=0.7, c=colors[i % len(colors)], 
-                      marker=markers[i % len(markers)],
-                      edgecolors='black', linewidth=1,
-                      label=f'θ={threshold:.2f}')
-            
-            if np.sum(reached_mask) > 2:
-                x_r, y_r = x[reached_mask], y[reached_mask]
-                z = np.polyfit(x_r, y_r, 1)
-                p_fit = np.poly1d(z)
-                x_trend = np.linspace(x_r.min(), x_r.max(), 100)
-                ax.plot(x_trend, p_fit(x_trend), '--', color=colors[i % len(colors)],
-                       alpha=0.5, linewidth=2)
-        
-        if np.any(~reached_mask):
-            ax.scatter(x[~reached_mask], y[~reached_mask],
-                      s=100, alpha=0.4, c=colors[i % len(colors)], marker='x',
-                      linewidth=2)
-    
-    ax.scatter([], [], s=100, alpha=0.4, c='gray', marker='x', linewidth=2, label='Not Reached')
-    
-    ax.set_xlabel('Spectral Gap (Δ_min)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Minimum p Required (p*)', fontsize=14, fontweight='bold')
-    ax.set_title(f'Minimum QAOA Depth vs Spectral Gap (N={N_value})',
-                 fontsize=16, fontweight='bold', pad=20)
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='best', fontsize=11, framealpha=0.9)
-    ax.set_ylim([0.5, max_p + 1.5])
-    ax.set_yticks(range(1, max_p + 2))
-    ax.set_yticklabels([str(i) if i <= max_p else 'N/R' for i in range(1, max_p + 2)])
-    
-    plt.tight_layout()
-    
-    # Save figure
-    input_stem = Path(input_csv).stem
-    if input_stem.startswith("QAOA_p_sweep"):
-        output_name = input_stem.replace("QAOA_p_sweep", "p_star_vs_gap", 1)
-    else:
-        output_name = f"p_star_vs_gap_{input_stem}"
-    
-    output_path = os.path.join(output_dir, f"{output_name}.png")
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"\n✅ Figure saved: {output_path}")
-    
-    # Correlation analysis
-    print(f"\n🔬 Correlation Analysis (p* vs Δ_min):")
-    for threshold in thresholds:
-        y = np.array(p_star_data[threshold])
-        reached_mask = y <= max_p
-        if np.sum(reached_mask) > 2:
-            x_valid = df['Delta_min'].values[reached_mask]
-            y_valid = y[reached_mask]
-            r, pval = pearsonr(x_valid, y_valid)
-            sig = '***' if pval < 0.001 else '**' if pval < 0.01 else '*' if pval < 0.05 else ''
-            print(f"   θ={threshold:.2f}: r={r:+.4f}, p-value={pval:.4f} {sig}")
-    
-    return output_path
 
 
 # =========================================================================
@@ -463,6 +448,14 @@ def main():
         print(f"\n❌ ERROR: Input file not found: {args.input}")
         sys.exit(1)
     
+    # Auto-detect input mode
+    if not args.skip_qaoa:
+        mode, gap_col = detect_input_mode(args.input)
+        print(f"   Mode:         {mode.upper()} (auto-detected)")
+        print(f"   Gap column:   {gap_col}")
+    else:
+        mode = 'unknown'  # Will be detected from results file if needed
+    
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"\n📁 Output directory: {args.output_dir}")
@@ -479,18 +472,27 @@ def main():
             sys.exit(1)
         print(f"\n⏭️  Skipping QAOA analysis, using: {qaoa_output}")
     else:
-        # Step 1: Run QAOA analysis
+        # Step 1: Run QAOA analysis (mode-dependent)
         p_values = list(range(args.p_min, args.p_max + 1))
-        qaoa_output = run_qaoa_analysis(
-            input_csv=args.input,
-            output_dir=args.output_dir,
-            degeneracy=args.degeneracy,
-            p_values=p_values,
-            max_iter=args.max_iter,
-            num_shots=args.shots,
-            use_parallel=use_parallel,
-            num_workers=num_workers
-        )
+        
+        if mode == 'weighted':
+            qaoa_output = run_qaoa_analysis_weighted(
+                input_csv=args.input,
+                output_dir=args.output_dir,
+                p_values=p_values,
+                max_iter=args.max_iter
+            )
+        else:
+            qaoa_output = run_qaoa_analysis_unweighted(
+                input_csv=args.input,
+                output_dir=args.output_dir,
+                degeneracy=args.degeneracy,
+                p_values=p_values,
+                max_iter=args.max_iter,
+                num_shots=args.shots,
+                use_parallel=use_parallel,
+                num_workers=num_workers
+            )
     
     # Step 2: Monotonic filtering
     if args.skip_filter:
@@ -499,10 +501,20 @@ def main():
     else:
         filtered_output = run_monotonic_filter(qaoa_output, args.output_dir)
     
-    # Steps 3 & 4: Generate plots
+    # Steps 3 & 4: Generate plots using standalone modules
+    ratio_plot = None
+    p_star_plot = None
+    
     if not args.skip_plots:
-        ratio_plot = run_ratio_vs_gap_plot(filtered_output, args.output_dir)
-        p_star_plot = run_p_star_plot(filtered_output, args.output_dir, DEFAULT_THRESHOLDS)
+        print("\n" + "=" * 70)
+        print("  STEP 3: PLOTTING APPROXIMATION RATIO vs SPECTRAL GAP")
+        print("=" * 70)
+        ratio_plot = plot_ratio_vs_gap(filtered_output, args.output_dir)
+        
+        print("\n" + "=" * 70)
+        print("  STEP 4: PLOTTING p* (MINIMUM DEPTH) vs SPECTRAL GAP")
+        print("=" * 70)
+        p_star_plot = plot_p_star_vs_gap(filtered_output, args.output_dir, DEFAULT_THRESHOLDS)
     
     # Summary
     total_time = time.time() - start_time
@@ -524,4 +536,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
