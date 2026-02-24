@@ -1,12 +1,14 @@
-# Outputs directory
-outputs/*.csv
-outputs/*.png
-outputs/*.npy
-outputs/*.txt
-outputs/pipeline_*/
-outputs/test_*/
-outputs/weighted_*/
-outputs/results/
+# Outputs - track CSVs (collaborators need them), ignore images and temp files
+outputs/**/*.png
+outputs/**/*.npy
+outputs/**/*.txt
+outputs/.DS_Store
+
+# Legacy output directory (merged into outputs/)
+DataOutputs/
+
+# Desktop mirror (should never appear in repo, but just in case)
+FinalQML_Outputs/
 
 # Python
 __pycache__/

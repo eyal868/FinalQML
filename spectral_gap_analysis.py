@@ -3,7 +3,7 @@
 =========================================================================
 Spectral Gap Analysis for Regular Graphs (Sparse Optimized)
 =========================================================================
-Research Goal: Analyze the minimum energy gap (Δ_min) of the Adiabatic 
+Research Goal: Analyze the minimum energy gap (Δ_min) of the Adiabatic
 Quantum Computing (AQC) Hamiltonian H(s) for Max-Cut on regular graphs.
 
 METHODOLOGY:
@@ -28,6 +28,8 @@ from aqc_spectral_utils import (
     extract_graph_params
 )
 
+from output_config import get_run_dirs, save_file, save_run_info
+
 # =========================================================================
 # 1. CONFIGURATION PARAMETERS
 # =========================================================================
@@ -40,15 +42,15 @@ CONFIG = {
         14: [236],
         16: [3218,3221,2853,2828,125,2089,1831,2202,2081,1504]
     },
-    
-    'output_suffix': '----', # Filename suffix
+
+    'output_suffix': '', # Filename suffix
     'degree': 3,                          # Graph regularity (3, 4, 5)
-    
+
     # SPARSE METHOD OPTIONS
     'target_degeneracy': 2,               # Only process k=2 graphs (unique solution)
     's_bounds': (0.01, 0.99),             # Optimization bounds
     'xtol': 1e-4,                         # Optimization tolerance
-    
+
     # TIMEOUT
     'graph_timeout': 10,                 # Timeout in seconds per graph (None to disable)
 }
@@ -74,9 +76,10 @@ GENREG_FILES = {
 def _generate_output_filename():
     """Auto-generate filename from configuration."""
     N_str = f"N{CONFIG['N_values'][0]}" if len(CONFIG['N_values']) == 1 else f"N{'_'.join(map(str, CONFIG['N_values']))}"
-    degree_str = f"{CONFIG['degree']}_regular"
-    method_str = f"_sparse_k{CONFIG.get('target_degeneracy', 2)}"
-    return f"outputs/Delta_min_{degree_str}_{N_str}{method_str}{CONFIG['output_suffix']}.csv"
+    degree_str = f"{CONFIG['degree']}reg"
+    method_str = f"_k{CONFIG.get('target_degeneracy', 2)}"
+    suffix = CONFIG.get('output_suffix', '')
+    return f"outputs/spectral_gap/spectral_gap_{degree_str}_{N_str}{method_str}{suffix}.csv"
 
 OUTPUT_FILENAME = _generate_output_filename()
 
@@ -96,13 +99,13 @@ def _worker_wrapper(queue, func, args, kwargs):
 def run_with_timeout(func, args=(), kwargs=None, timeout=None):
     """
     Run a function with a timeout using multiprocessing.
-    
+
     Args:
         func: Function to run
         args: Positional arguments for func
         kwargs: Keyword arguments for func
         timeout: Timeout in seconds (None = no timeout)
-        
+
     Returns:
         Tuple of (result, timed_out):
         - result: Function return value (or None if timed out/error)
@@ -111,20 +114,20 @@ def run_with_timeout(func, args=(), kwargs=None, timeout=None):
     if timeout is None:
         # No timeout, run directly
         return func(*args, **(kwargs or {})), False
-    
+
     kwargs = kwargs or {}
     queue = Queue()
-    
+
     p = Process(target=_worker_wrapper, args=(queue, func, args, kwargs))
     p.start()
     p.join(timeout)
-    
+
     if p.is_alive():
         # Timeout occurred
         p.terminate()
         p.join()
         return None, True
-    
+
     # Get result from queue
     if not queue.empty():
         status, result = queue.get()
@@ -134,7 +137,7 @@ def run_with_timeout(func, args=(), kwargs=None, timeout=None):
             # Error occurred in subprocess
             print(f"    Warning: Subprocess error: {result}")
             return None, False
-    
+
     return None, False
 
 
@@ -157,32 +160,32 @@ def main():
     print(f"  • Timeout per graph: {timeout}s" if timeout else "  • Timeout: disabled")
     print(f"  • Output: {OUTPUT_FILENAME}")
     print(f"  • Graph degree: {CONFIG['degree']}-regular")
-    
+
     # Initialize
     data = []
     total_eigsh_calls = 0
     skipped_degeneracy = 0
     timeout_skipped = []  # Track graphs skipped due to timeout
     graph_timeout = CONFIG.get('graph_timeout', None)
-    
+
     start_time = time.time()
     print(f"\n🚀 Starting analysis...")
     print("-" * 70)
-    
+
     graph_counter = 0
-    
+
     # Process configured N values
     for N in sorted(CONFIG['N_values']):
         degree = CONFIG['degree']
-        
+
         if N not in GENREG_FILES or degree not in GENREG_FILES[N]:
             print(f"\n⚠️  Skipping N={N}: No GENREG file specified")
             continue
-            
+
         filename = GENREG_FILES[N][degree]
         print(f"\n▶ Processing N={N}, deg={degree} (Hilbert dim: {2**N})")
         print(f"  📖 Reading graphs from {filename}...", end=" ")
-        
+
         try:
             all_graphs = load_graphs_from_file(filename)
             print(f"✓ Found {len(all_graphs)} graphs")
@@ -192,7 +195,7 @@ def main():
         except Exception as e:
             print(f"\n  ❌ Error parsing file: {e}")
             continue
-        
+
         # Select graphs
         selection = CONFIG['graphs_per_N'].get(N, None)
         if selection is None:
@@ -209,18 +212,18 @@ def main():
             positions = [i-1 for i in sorted(selection) if 1 <= i <= len(all_graphs)]
             graphs = [all_graphs[i] for i in positions]
             graph_ids = positions
-        
+
         print(f"  🎯 Processing {len(graphs)} selected graphs")
         print(f"  🔧 Using SPARSE method (Vectorized Hamiltonians + Brent's Optimization)")
-        
+
         num_edges = degree * N // 2
-        
+
         # Process each graph
         for i, (file_pos, edges) in enumerate(zip(graph_ids, graphs)):
             graph_counter += 1
             iter_start = time.time()
             graph_id = file_pos + 1
-            
+
             # SPARSE METHOD with timeout
             result, timed_out = run_with_timeout(
                 find_min_gap_sparse,
@@ -233,21 +236,21 @@ def main():
                 },
                 timeout=graph_timeout
             )
-            
+
             if timed_out:
                 timeout_skipped.append(graph_id)
                 print(f"    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | ⏰ TIMEOUT (>{graph_timeout}s)")
                 continue
-            
+
             delta_min, s_min, max_deg, max_cut, num_evals = result
             total_eigsh_calls += num_evals
-            
+
             # Skip check
             if delta_min is None:
                 skipped_degeneracy += 1
                 print(f"    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | SKIPPED (deg ≠ {CONFIG.get('target_degeneracy', 2)})")
                 continue
-            
+
             # Store results
             data.append({
                 'N': N,
@@ -258,9 +261,9 @@ def main():
                 'Max_cut_value': max_cut,
                 'Edges': str(edges)
             })
-            
+
             graph_time = time.time() - iter_start
-            
+
             # Progress reporting
             print(f"    [{i+1:3d}/{len(graphs)}] Graph_ID={graph_id:3d} | "
                   f"⏱️  {graph_time:.2f}s | Δ_min={delta_min:.6f} s={s_min:.4f} "
@@ -272,9 +275,19 @@ def main():
         print(f"\n📊 Sorting and saving data...")
         df = pd.DataFrame(data)
         df = df.sort_values(['N', 'Delta_min'], ascending=[True, True])
+        import os
+        os.makedirs(os.path.dirname(OUTPUT_FILENAME), exist_ok=True)
         df.to_csv(OUTPUT_FILENAME, index=False)
         print(f"💾 Saved to {OUTPUT_FILENAME}")
-        
+
+        # Desktop mirror copy
+        try:
+            _, desktop_dir = get_run_dirs("spectral_gap", timestamp=True)
+            save_file(OUTPUT_FILENAME, "spectral_gap", _desktop_dir=desktop_dir)
+            save_run_info(desktop_dir, "spectral_gap", extra_info={"config": str(CONFIG)})
+        except Exception as e:
+            print(f"  ⚠️ Desktop copy skipped: {e}")
+
         # Statistics
         total_time = time.time() - start_time
         print(f"\n✅ ANALYSIS COMPLETE!")
@@ -286,7 +299,7 @@ def main():
         print(f"   • Total time: {total_time:.2f}s ({total_time/60:.2f}m)")
         print(f"   • Avg time/graph: {total_time/len(data):.2f}s")
         print(f"   • Avg eigsh calls: {total_eigsh_calls/len(data):.1f}")
-            
+
         print(f"\n📈 Overall Statistics:")
         print(f"   • Mean Δ_min: {df['Delta_min'].mean():.6f}")
         print(f"   • Min Δ_min: {df['Delta_min'].min():.6f}")
@@ -298,7 +311,7 @@ def main():
         if timeout_skipped:
             print(f"   • Skipped (timeout): {len(timeout_skipped)}")
             print(f"   • Timed out graph IDs: {timeout_skipped}")
-        
+
     print("=" * 70)
 
 if __name__ == "__main__":

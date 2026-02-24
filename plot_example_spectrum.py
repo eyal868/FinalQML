@@ -20,10 +20,12 @@ from aqc_spectral_utils import (
     DEGENERACY_TOL
 )
 
+from output_config import get_run_dirs, save_file, save_run_info
+
 # ============================================================================
 # CONFIGURATION - Edit these parameters to visualize different graphs
 # ============================================================================
-CSV_FILENAME = "outputs/Delta_min_3_regular_N12_sparse_k2_final.csv"
+CSV_FILENAME = "outputs/spectral_gap/spectral_gap_3reg_N12_k2.csv"
 GRAPH_ID = 18  # Which graph from the CSV to visualize
 S_RESOLUTION = 100  # Number of points for s interpolation
 MAX_EIGENVALUES_TO_PLOT = 6  # Show only first N eigenvalues (None for all)
@@ -32,21 +34,21 @@ MAX_EIGENVALUES_TO_PLOT = 6  # Show only first N eigenvalues (None for all)
 def load_graph_from_csv(csv_filename, graph_id):
     """
     Load graph data from CSV file by graph ID.
-    
+
     Returns:
         dict with keys: 'N', 'edges', 'Delta_min', 's_at_min', 'Max_degeneracy', 'Max_cut_value'
     """
     df = pd.read_csv(csv_filename)
     row = df[df['Graph_ID'] == graph_id]
-    
+
     if len(row) == 0:
         raise ValueError(f"Graph ID {graph_id} not found in {csv_filename}")
-    
+
     row = row.iloc[0]
-    
+
     # Parse edges string (stored as Python list literal)
     edges = ast.literal_eval(row['Edges'])
-    
+
     return {
         'N': int(row['N']),
         'edges': edges,
@@ -150,9 +152,9 @@ for i in range(eigenvalues_to_show):
         ax.plot(s_points, all_eigenvalues[:, i], color='darkgray', linewidth=0.8, alpha=0.5)
 
 # Highlight the detected minimum gap levels
-ax.plot(s_points, all_eigenvalues[:, min_gap_level1], 'b-', linewidth=3, alpha=0.9, 
+ax.plot(s_points, all_eigenvalues[:, min_gap_level1], 'b-', linewidth=3, alpha=0.9,
         label=f'E_{min_gap_level1} (ground state)')
-ax.plot(s_points, all_eigenvalues[:, min_gap_level2], 'r-', linewidth=3, alpha=0.9, 
+ax.plot(s_points, all_eigenvalues[:, min_gap_level2], 'r-', linewidth=3, alpha=0.9,
         label=f'E_{min_gap_level2} (min gap level)')
 
 # Mark minimum gap location
@@ -164,7 +166,7 @@ gap_energy_1 = all_eigenvalues[min_gap_idx, min_gap_level1]
 gap_energy_2 = all_eigenvalues[min_gap_idx, min_gap_level2]
 ax.annotate('', xy=(s_at_min, gap_energy_2), xytext=(s_at_min, gap_energy_1),
             arrowprops=dict(arrowstyle='<->', color='green', lw=2))
-ax.text(s_at_min + 0.02, (gap_energy_1 + gap_energy_2) / 2, 
+ax.text(s_at_min + 0.02, (gap_energy_1 + gap_energy_2) / 2,
         f'Δ={min_gap:.4f}', fontsize=11, color='green', fontweight='bold')
 
 ax.set_xlabel('s (interpolation parameter)', fontsize=14)
@@ -177,16 +179,27 @@ if MAX_EIGENVALUES_TO_PLOT is not None:
     title_str += f' (showing {eigenvalues_to_show} lowest eigenvalues, sparse method)'
 else:
     title_str += f' (all {2**N} eigenvalues)'
-    
+
 ax.set_title(title_str, fontsize=16, fontweight='bold')
 ax.grid(True, alpha=0.3)
 ax.legend(fontsize=12, loc='best')
 ax.set_xlim(0, 1)
 
 plt.tight_layout()
-filename = f"outputs/example_full_spectrum_N{N}_graph{GRAPH_ID}--------.png"
+import os
+os.makedirs('outputs/figures', exist_ok=True)
+filename = f"outputs/figures/spectrum_N{N}_graph{GRAPH_ID}.png"
 plt.savefig(filename, dpi=200, bbox_inches='tight')
 print(f"\n📊 Plot saved to: {filename}")
+
+# Desktop mirror copy
+try:
+    _, desktop_dir = get_run_dirs("spectrum", timestamp=True)
+    save_file(filename, "spectrum", _desktop_dir=desktop_dir)
+    save_run_info(desktop_dir, "spectrum", extra_info={"graph_id": GRAPH_ID, "N": N})
+except Exception as e:
+    print(f"  ⚠️ Desktop copy skipped: {e}")
+
 plt.show()
 
 print("\n" + "="*70)

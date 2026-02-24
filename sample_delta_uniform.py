@@ -9,10 +9,12 @@ Ensures graphs 744 and 3571 are included as edge cases.
 import pandas as pd
 import numpy as np
 
+from output_config import get_run_dirs, save_file, save_run_info
+
 np.random.seed(42)  # Reproducibility
 
 # Load source data
-df = pd.read_csv('outputs/Delta_min_3_regular_N16_merged.csv')
+df = pd.read_csv('outputs/spectral_gap/spectral_gap_3reg_N16_merged.csv')
 
 # Force include required graphs (edge cases)
 required_ids = [744, 3571]
@@ -38,10 +40,10 @@ for low, high in bins:
     bin_df = remaining[(remaining['Delta_min'] >= low) & (remaining['Delta_min'] < high)]
     n_available = len(bin_df)
     n_sample = min(n_available, target_per_bin)
-    
+
     if n_available > 0:
         sampled_rows.append(bin_df.sample(n=n_sample))
-    
+
     # Track any unused quota from small bins
     leftover_quota += target_per_bin - n_sample
 
@@ -49,7 +51,7 @@ for low, high in bins:
 if sampled_rows:
     first_pass = pd.concat(sampled_rows)
     result = pd.concat([result, first_pass])
-    
+
     # Remove already sampled from remaining pool
     remaining = remaining[~remaining['Graph_ID'].isin(first_pass['Graph_ID'])]
 
@@ -65,7 +67,7 @@ if leftover_quota > 0:
             extra_samples.append(bin_df.sample(n=n_extra))
             leftover_quota -= n_extra
             remaining = remaining[~remaining['Graph_ID'].isin(extra_samples[-1]['Graph_ID'])]
-    
+
     if extra_samples:
         result = pd.concat([result] + extra_samples)
 
@@ -86,8 +88,19 @@ elif len(result) < 100:
 result = result.sort_values('Delta_min').reset_index(drop=True)
 
 # Save output
-output_path = 'outputs/Delta_min_3_regular_N16_uniform100.csv'
+import os
+output_dir = 'outputs/spectral_gap'
+os.makedirs(output_dir, exist_ok=True)
+output_path = os.path.join(output_dir, 'spectral_gap_3reg_N16_uniform100.csv')
 result.to_csv(output_path, index=False)
+
+# Desktop mirror copy
+try:
+    _, desktop_dir = get_run_dirs("sample_delta_uniform", timestamp=True)
+    save_file(output_path, "sample_delta_uniform", _desktop_dir=desktop_dir)
+    save_run_info(desktop_dir, "sample_delta_uniform", extra_info={"source": "spectral_gap_3reg_N16_merged.csv"})
+except Exception as e:
+    print(f"  \u26a0\ufe0f Desktop copy skipped: {e}")
 
 # Print summary
 print(f"Created {output_path} with {len(result)} rows")
